@@ -43,8 +43,9 @@ enum oom_constraint {
 extern void compare_swap_oom_score_adj(short old_val, short new_val);
 extern short test_set_oom_score_adj(short new_val);
 
-extern unsigned int oom_badness(struct task_struct *p, struct mem_cgroup *memcg,
-			const nodemask_t *nodemask, unsigned long totalpages);
+extern unsigned long oom_badness(struct task_struct *p,
+		struct mem_cgroup *memcg, const nodemask_t *nodemask,
+		unsigned long totalpages);
 
 extern int oom_kills_count(void);
 extern void note_oom_kill(void);
