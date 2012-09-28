@@ -84,11 +84,11 @@
 #include "f_ncm.c"
 #include "rndis.c"
 #endif
-#include "u_ether.c"
 #include "u_bam_data.c"
 #include "f_mbim.c"
 #include "f_qc_ecm.c"
 #include "f_qc_rndis.c"
+#include "u_ether.c"
 #include "u_qc_ether.c"
 #ifdef CONFIG_TARGET_CORE
 #include "f_tcm.c"
