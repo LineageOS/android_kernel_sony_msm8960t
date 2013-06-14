@@ -109,6 +109,8 @@
 #define SMD_CNTL_TYPE 1
 #define SMD_DCI_TYPE 2
 
+#define DIAG_TS_SIZE	50
+
 /* Maximum number of pkt reg supported at initialization*/
 extern int diag_max_reg;
 extern int diag_threshold_reg;
@@ -358,5 +360,7 @@ extern struct diagchar_dev *driver;
 
 extern int wrap_enabled;
 extern uint16_t wrap_count;
+
+void diag_get_timestamp(char *time_str);
 
 #endif
