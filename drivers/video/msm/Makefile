@@ -84,6 +84,12 @@ obj-$(CONFIG_FB_MSM_MIPI_DSI_NT35510) += mipi_NT35510.o
 obj-$(CONFIG_FB_MSM_MIPI_DSI_NT35516) += mipi_truly_tft540960_1_e.o
 obj-$(CONFIG_FB_MSM_MIPI_DSI_NT35590) += mipi_NT35590.o
 obj-$(CONFIG_FB_MSM_MIPI_DSI_SIMULATOR) += mipi_simulator.o
+obj-$(CONFIG_FB_MSM_MIPI_DSI) += mipi_dsi_panel_driver.o
+ifeq ($(CONFIG_DEBUG_FS),y)
+obj-$(CONFIG_FB_MSM_MIPI_DSI) += mipi_dsi_panel_debugfs.o
+endif
+obj-$(CONFIG_FB_MSM_MIPI_DSI_RENESAS_R63306) += mipi_r63306_panels/
+obj-$(CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0) += mipi_s6d6aa0_panels/
 
 # MIPI Bridge
 obj-$(CONFIG_FB_MSM_MIPI_DSI_TC358764_DSI2LVDS) += mipi_tc358764_dsi2lvds.o
