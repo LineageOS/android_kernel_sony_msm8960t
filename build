@@ -1,0 +1,12 @@
+# Builds the kernel and moves the zImage to the elf_build folder
+ARCH=arm CROSS_COMPILE=/media/LinuxStorage/cm-10.2/prebuilts/gcc/linux-x86/arm/arm-eabi-4.6/bin/arm-eabi- make -j8
+
+echo "checking for compiled kernel..."
+if [ -f arch/arm/boot/zImage ]
+then
+
+cp arch/arm/boot/zImage elf_build/.
+
+echo "DONE"
+
+fi
