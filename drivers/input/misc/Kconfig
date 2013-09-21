@@ -699,4 +699,11 @@ config INPUT_L3GD20
 	help
 	  If you say yes here you get support L3GD20 gyroscope sensor.
 
+config INPUT_AKM8963
+	tristate "AKM8963 Compass Driver"
+	default n
+	depends on I2C
+	help
+	  Say Y here if you want support for the AKM8963 Compass Driver.
+
 endif
