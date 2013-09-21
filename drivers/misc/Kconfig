@@ -667,6 +667,13 @@ config QFP_FUSE
 	  to the fuse block. Currently this is supported only
 	  on FSM targets.
 
+config NFC_PN544
+	tristate "NFC driver for PN544"
+	default n
+	depends on I2C
+	help
+	  This option enables support for PN544.
+
 config USB_HSIC_SMSC_HUB
 	tristate "Support for HSIC based MSM on-chip SMSC3503 HUB"
 	depends on USB_EHCI_MSM_HSIC
