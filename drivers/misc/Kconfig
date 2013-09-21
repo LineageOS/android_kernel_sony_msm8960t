@@ -624,6 +624,16 @@ config PMIC8XXX_NFC
 	  Qualcomm PM8XXX chips have a module to support NFC (Near Field
 	  Communication). This option enables the driver to support it.
 
+config LM3561
+	tristate "LED driver for LM3561"
+	default n
+	depends on I2C
+	help
+	  This option enables support for LM3561
+	  led controller.
+	  The LM3561 is the flash led that works
+	  with camera.
+
 config PMIC8XXX_UPL
 	tristate "Qualcomm PM8XXX support for User Programmable Logic"
 	depends on MFD_PM8XXX
