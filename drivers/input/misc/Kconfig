@@ -524,6 +524,16 @@ config INPUT_BFIN_ROTARY
 	  To compile this driver as a module, choose M here: the
 	  module will be called bfin-rotary.
 
+config INPUT_LSM303DLHC_ACCELEROMETER_LT
+        tristate "LSM303DLHC combo chip light accelerometer driver"
+        depends on I2C
+        default n
+        help
+          LSM303DLHC combo chip light accelerometer driver. It uses runtime
+          power management to save current instead of irq. It supports
+          polling intervals down to 10 ms and up to 10000 ms. Runtime power
+          management operates either with regulator or chip power-down mode.
+
 config INPUT_WM831X_ON
 	tristate "WM831X ON pin"
 	depends on MFD_WM831X
