@@ -692,4 +692,11 @@ config INPUT_APDS9702
 	  If you say yes here you get support for the APDS9702 chip.
 	  This is used as a proximity sensor.
 
+config INPUT_L3GD20
+	bool "L3GD20 gyroscope sensor driver"
+	depends on I2C
+	default n
+	help
+	  If you say yes here you get support L3GD20 gyroscope sensor.
+
 endif
