@@ -1875,3 +1875,13 @@ irqreturn_t mipi_dsi_isr(int irq, void *ptr)
 
 	return IRQ_HANDLED;
 }
+
+void mipi_dsi_buf_release(struct dsi_buf *dp)
+{
+	kfree(dp->start);
+	dp->start = NULL;
+	dp->end = NULL;
+	dp->data = NULL;
+	dp->size = 0;
+	dp->len = 0;
+}

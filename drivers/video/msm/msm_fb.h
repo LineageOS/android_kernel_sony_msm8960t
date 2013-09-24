@@ -154,6 +154,7 @@ struct msm_fb_data_type {
 	__u32 bl_level;
 
 	struct platform_device *pdev;
+	struct platform_device *panel_pdev;
 
 	__u32 var_xres;
 	__u32 var_yres;
@@ -196,6 +197,9 @@ struct msm_fb_data_type {
 	u32 writeback_state;
 	bool writeback_active_cnt;
 	int cont_splash_done;
+
+	struct mutex power_lock;
+
 	void *cpu_pm_hdl;
 	u32 acq_fen_cnt;
 	struct sync_fence *acq_fen[MDP_MAX_FENCE_FD];
@@ -218,6 +222,9 @@ struct msm_fb_data_type {
 	unsigned char *copy_splash_phys;
 	uint32 sec_mapped;
 	uint32 sec_active;
+#ifdef CONFIG_FB_MSM_RECOVER_PANEL
+	bool nvrw_prohibit_draw;
+#endif
 };
 struct msm_fb_backup_type {
 	struct fb_info info;
