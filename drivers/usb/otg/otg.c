@@ -95,6 +95,10 @@ const char *otg_state_string(enum usb_otg_state state)
 		return "b_wait_acon";
 	case OTG_STATE_B_HOST:
 		return "b_host";
+	case OTG_STATE_MHL_DETECTED:
+		return "mhl_detected";
+	case OTG_STATE_MHL_CONNECTED:
+		return "mhl_connected";
 	default:
 		return "UNDEFINED";
 	}
