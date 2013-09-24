@@ -435,7 +435,11 @@ static int msm_server_control(struct msm_cam_server_dev *server_dev,
 	/* wait event may be interrupted by sugnal,
 	 * in this case -ERESTARTSYS is returned and retry is needed.
 	 * Now we only retry once. */
+#if defined(CONFIG_SONY_CAM_V4L2)
+	wait_count = 10;
+#else
 	wait_count = 2;
+#endif
 	do {
 		rc = wait_event_interruptible_timeout(queue->wait,
 			!list_empty_careful(&queue->list),
@@ -445,6 +449,9 @@ static int msm_server_control(struct msm_cam_server_dev *server_dev,
 			break;
 		D("%s: wait_event interrupted by signal, remain_count = %d",
 			__func__, wait_count);
+#if defined(CONFIG_SONY_CAM_V4L2)
+		msleep(20);
+#endif
 	} while (1);
 	D("Waiting is over for config status\n");
 	if (list_empty_careful(&queue->list)) {
@@ -777,7 +784,11 @@ int msm_server_streamoff(struct msm_cam_v4l2_device *pcam, int idx)
 
 	D("%s, pcam = 0x%x\n", __func__, (u32)pcam);
 	ctrlcmd.type        = MSM_V4L2_STREAM_OFF;
+#ifdef CONFIG_SONY_CAM_V4L2
+	ctrlcmd.timeout_ms  = 3000;
+#else
 	ctrlcmd.timeout_ms  = 10000;
+#endif
 	ctrlcmd.length      = 0;
 	ctrlcmd.value       = NULL;
 	ctrlcmd.stream_type = pcam->dev_inst[idx]->image_mode;

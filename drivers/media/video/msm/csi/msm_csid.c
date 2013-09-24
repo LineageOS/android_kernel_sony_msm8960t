@@ -359,6 +359,11 @@ static int msm_csid_release(struct csid_device *csid_dev)
 	uint32_t irq;
 	uint8_t core_id = 0;
 
+#if defined(CONFIG_SONY_CAM_V4L2)
+  if (!csid_dev->base)
+    return -EINVAL;
+#endif
+
 	if (csid_dev->csid_state != CSID_POWER_UP) {
 		pr_err("%s: csid invalid state %d\n", __func__,
 			csid_dev->csid_state);
