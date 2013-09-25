@@ -483,6 +483,7 @@ struct msm_fb_platform_data {
 
 struct msm_hdmi_platform_data {
 	int irq;
+	const char *coupled_mhl_device;
 	int (*cable_detect)(int insert);
 	int (*comm_power)(int on, int show);
 	int (*enable_5v)(int on);
