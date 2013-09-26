@@ -2948,6 +2948,11 @@ static int mdp4_calc_pipe_mdp_bw(struct msm_fb_data_type *mfd,
 	}
 
 	fps = mdp_get_panel_framerate(mfd);
+
+	/*
+	 * Workaround for issue when 2bpp and 4bpp pipes in use,
+	 * always use max bpp to avoid underrun
+	 */
 	quota = pipe->src_w * pipe->src_h * fps * pipe->bpp;
 
 	quota >>= shift;

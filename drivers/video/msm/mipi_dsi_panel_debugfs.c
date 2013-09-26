@@ -321,7 +321,6 @@ static int setup_reg_access(struct device *dev, struct dsi_buf *rx_buf,
 
 	if (copy_from_user(*buf, ubuf, count)) {
 		ret = -EFAULT;
-                kfree(*buf);
 		goto fail_free_all;
 	}
 	return 0;
@@ -329,6 +328,7 @@ static int setup_reg_access(struct device *dev, struct dsi_buf *rx_buf,
 fail_free_all:
 	if (tx_buf)
 		mipi_dsi_buf_release(tx_buf);
+	kfree(*buf);
 fail_free_rx:
 	if (rx_buf)
 		mipi_dsi_buf_release(rx_buf);
@@ -376,7 +376,7 @@ exit:
 	return ret;
 }
 
-static int prepare_for_reg_access(struct msm_fb_data_type *mfd,
+int prepare_for_reg_access(struct msm_fb_data_type *mfd,
 				  enum power_state *old_state)
 {
 	struct device *dev = &mfd->panel_pdev->dev;
@@ -422,7 +422,7 @@ exit:
 	return ret;
 }
 
-static void post_reg_access(struct msm_fb_data_type *mfd,
+void post_reg_access(struct msm_fb_data_type *mfd,
 			    enum power_state old_state)
 {
 	struct mipi_dsi_data *dsi_data;
@@ -524,10 +524,9 @@ static ssize_t reg_read(struct file *file, const char __user *ubuf,
 	dsi.dlen = i;
 	dsi.payload = params;
 
-	dev_dbg(dev, "dtype = %d, last = %d, vc = %d\n",
-			dsi.dtype, dsi.last, dsi.vc);
-	dev_dbg(dev, "ack = %d, wait = %d, dlen = %d\n",
-			dsi.ack, dsi.wait, dsi.dlen);
+	dev_dbg(dev, "dtype = %d, last = %d, vc = %d, ack = %d, wait = %d, "
+		"dlen = %d\n", dsi.dtype, dsi.last, dsi.vc, dsi.ack, dsi.wait,
+		dsi.dlen);
 	for (j = 0; j < i; j++)
 		dev_dbg(dev, "payload[%d] = 0x%x\n", j, dsi.payload[j]);
 

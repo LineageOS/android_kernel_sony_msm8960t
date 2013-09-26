@@ -1,4 +1,5 @@
 /* Copyright (c) 2008-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -84,7 +85,6 @@ struct msm_fb_data_type {
 
 	struct device *dev;
 	boolean op_enable;
-	struct delayed_work backlight_worker;
 	uint32 fb_imgType;
 	boolean sw_currently_refreshing;
 	boolean sw_refreshing_enable;
@@ -197,9 +197,6 @@ struct msm_fb_data_type {
 	u32 writeback_state;
 	bool writeback_active_cnt;
 	int cont_splash_done;
-
-	struct mutex power_lock;
-
 	void *cpu_pm_hdl;
 	u32 acq_fen_cnt;
 	struct sync_fence *acq_fen[MDP_MAX_FENCE_FD];
@@ -222,9 +219,10 @@ struct msm_fb_data_type {
 	unsigned char *copy_splash_phys;
 	uint32 sec_mapped;
 	uint32 sec_active;
-#ifdef CONFIG_FB_MSM_RECOVER_PANEL
-	bool nvrw_prohibit_draw;
+#if defined(CONFIG_DEBUG_FS) || defined(CONFIG_FB_MSM_RECOVER_PANEL)
+	struct mutex power_lock;
 #endif
+	bool nvrw_prohibit_draw;
 };
 struct msm_fb_backup_type {
 	struct fb_info info;
@@ -258,10 +256,5 @@ void msm_fb_config_backlight(struct msm_fb_data_type *mfd);
 void fill_black_screen(bool on, uint8 pipe_num, uint8 mixer_num);
 int msm_fb_check_frame_rate(struct msm_fb_data_type *mfd,
 				struct fb_info *info);
-
-#ifdef CONFIG_FB_MSM_LOGO
-#define INIT_IMAGE_FILE "/initlogo.rle"
-int load_565rle_image(char *filename, bool bf_supported);
-#endif
 
 #endif /* MSM_FB_H */

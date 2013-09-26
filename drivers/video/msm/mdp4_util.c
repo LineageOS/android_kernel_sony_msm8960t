@@ -35,6 +35,7 @@
 #include "mdp4.h"
 
 struct mdp4_statistic mdp4_stat;
+struct mdp_pcc_cfg_data *pcc_cfg_ptr;
 
 struct mdp_csc_cfg_data csc_cfg_matrix[CSC_MAX_BLOCKS] = {
 	{
@@ -535,6 +536,9 @@ irqreturn_t mdp4_isr(int irq, void *ptr)
 				continue;
 			mgmt->mdp_is_hist_valid = FALSE;
 		}
+
+		if (pcc_cfg_ptr != NULL)
+			mdp4_pcc_cfg(pcc_cfg_ptr);
 	}
 
 	if (isr & INTR_EXTERNAL_INTF_UDERRUN) {
