@@ -131,12 +131,7 @@ asflags-y := -Wa,-march=all
 # Supply kernel BSS size to the decompressor via a linker symbol.
 KBSS_SZ = $(shell $(CROSS_COMPILE)size $(obj)/../../../../vmlinux | \
 		awk 'END{print $$3}')
-ifeq ($(shell uname),Darwin)
-	$(info system is Darwin, use BSD style stat)
-	LDFLAGS_vmlinux = --defsym _image_size=$(shell stat -f "%z" $(obj)/../Image)
-else
-	LDFLAGS_vmlinux = --defsym _image_size=$(shell stat -c "%s" $(obj)/../Image)
-endif
+LDFLAGS_vmlinux = --defsym _kernel_bss_size=$(KBSS_SZ)
 # Supply ZRELADDR to the decompressor via a linker symbol.
 ifneq ($(CONFIG_AUTO_ZRELADDR),y)
 LDFLAGS_vmlinux += --defsym zreladdr=$(ZRELADDR)
