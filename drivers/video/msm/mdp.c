@@ -2369,6 +2369,11 @@ static int mdp_off(struct platform_device *pdev)
 	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
 
 	pr_debug("%s:+\n", __func__);
+	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
+	ret = panel_next_off(pdev);
+	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
+
+
 	mdp_histogram_ctrl_all(FALSE);
 	atomic_set(&vsync_cntrl.suspend, 1);
 	atomic_set(&vsync_cntrl.vsync_resume, 0);
@@ -2388,10 +2393,6 @@ static int mdp_off(struct platform_device *pdev)
 		mdp4_lcdc_off(pdev);
 	else if (mfd->panel.type == WRITEBACK_PANEL)
 		mdp4_overlay_writeback_off(pdev);
-
-	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-	ret = panel_next_off(pdev);
-	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 
 	mdp_clk_ctrl(0);
 #ifdef CONFIG_MSM_BUS_SCALING
@@ -2424,21 +2425,11 @@ static int mdp_on(struct platform_device *pdev)
 
 	pr_debug("%s:+\n", __func__);
 
-	if (!(mfd->cont_splash_done)) {
-		if (mfd->panel.type == MIPI_VIDEO_PANEL)
-			mdp4_dsi_video_splash_done();
-
-		/* Clks are enabled in probe.
-		Disabling clocks now */
-		mdp_clk_ctrl(0);
-		mfd->cont_splash_done = 1;
-	}
-
+	mdp_clk_ctrl(1);
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-
 	ret = panel_next_on(pdev);
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
-
+	mdp_clk_ctrl(0);
 
 	if (mdp_rev >= MDP_REV_40) {
 		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
@@ -2790,6 +2781,7 @@ static int mdp_irq_clk_setup(struct platform_device *pdev,
 	MSM_FB_DEBUG("mdp_clk: mdp_clk=%d\n", (int)clk_get_rate(mdp_clk));
 #endif
 
+#if 0
 	if (mdp_rev == MDP_REV_42 && !cont_splashScreen) {
 		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 		/* DSI Video Timing generator disable */
@@ -2800,6 +2792,7 @@ static int mdp_irq_clk_setup(struct platform_device *pdev,
 		outpdw(MDP_BASE + 0x10004, 0x3);
 		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 	}
+#endif
 	return 0;
 }
 
@@ -2810,6 +2803,7 @@ static int mdp_probe(struct platform_device *pdev)
 	struct msm_fb_panel_data *pdata = NULL;
 	int rc;
 	resource_size_t  size ;
+	struct msm_panel_info *pinfo = NULL;
 	unsigned long flag;
 	u32 frame_rate;
 #ifdef CONFIG_FB_MSM_MDP40
@@ -2854,6 +2848,8 @@ static int mdp_probe(struct platform_device *pdev)
 		if (rc)
 			return rc;
 
+		mdp_clk_ctrl(1);
+
 		mdp_hw_version();
 
 		/* initializing mdp hw */
@@ -2867,6 +2863,8 @@ static int mdp_probe(struct platform_device *pdev)
 #ifdef CONFIG_FB_MSM_OVERLAY
 		mdp_hw_cursor_init();
 #endif
+		mdp_clk_ctrl(0);
+
 		mdp_resource_initialized = 1;
 		return 0;
 	}
@@ -3276,6 +3274,26 @@ static int mdp_probe(struct platform_device *pdev)
 	/* set driver data */
 	platform_set_drvdata(msm_fb_dev, mfd);
 
+	/* panel detection */
+	MSM_FB_INFO("mdp_probe: panel_detect function\n");
+	if (pdata && pdata->panel_detect && pdata->update_panel) {
+		rc = panel_next_on(msm_fb_dev);
+		if (!rc) {
+			pinfo = pdata->panel_detect(mfd);
+			rc = panel_next_off(msm_fb_dev);
+		}
+		if (!rc && pinfo)
+			mfd->panel_info = *pinfo;
+		pdata->update_panel(pdev);
+#ifdef CONFIG_FB_MSM_MDP40
+		if (mfd->panel.type == MIPI_CMD_PANEL) {
+			mipi = &mfd->panel_info.mipi;
+		}
+#endif
+	} else {
+		MSM_FB_INFO("mdp_probe: no panel_detect function\n");
+	}
+
 	rc = platform_device_add(msm_fb_dev);
 	if (rc) {
 		goto mdp_probe_err;
@@ -3337,7 +3355,7 @@ void mdp_footswitch_ctrl(boolean on)
 	if (dsi_pll_vdda)
 		regulator_enable(dsi_pll_vdda);
 
-	mipi_dsi_prepare_ahb_clocks();
+	mipi_dsi_prepare_clocks();
 	mipi_dsi_ahb_ctrl(1);
 	mipi_dsi_phy_ctrl(1);
 	mipi_dsi_clk_enable();
@@ -3353,10 +3371,9 @@ void mdp_footswitch_ctrl(boolean on)
 	}
 
 	mipi_dsi_clk_disable();
-	mipi_dsi_unprepare_clocks();
 	mipi_dsi_phy_ctrl(0);
 	mipi_dsi_ahb_ctrl(0);
-	mipi_dsi_unprepare_ahb_clocks();
+	mipi_dsi_unprepare_clocks();
 
 	if (dsi_pll_vdda)
 		regulator_disable(dsi_pll_vdda);
