@@ -1,2 +1,2 @@
 # fetches the kernel defconfig
-ARCH=arm CROSS_COMPILE=/media/LinuxStorage/cm-10.2/prebuilts/gcc/linux-x86/arm/arm-eabi-4.6/bin/arm-eabi- make viskan_huashan_defconfig
+ARCH=arm CROSS_COMPILE=/media/LinuxStorage/caf-4.1/prebuilts/gcc/linux-x86/arm/arm-eabi-4.6/bin/arm-eabi- make viskan_huashan_defconfig
