@@ -685,11 +685,9 @@ void *kgsl_iommu_create_pagetable(void)
 	};
 
 	iommu_pt = kzalloc(sizeof(struct kgsl_iommu_pt), GFP_KERNEL);
-	if (!iommu_pt) {
-		KGSL_CORE_ERR("kzalloc(%d) failed\n",
-				sizeof(struct kgsl_iommu_pt));
+	if (!iommu_pt)
 		return NULL;
-	}
+
 	/* L2 redirect is not stable on IOMMU v2 */
 	if (msm_soc_version_supports_iommu_v1())
 		kgsl_layout.domain_flags = MSM_IOMMU_DOMAIN_PT_CACHEABLE;
@@ -1377,11 +1375,8 @@ static int kgsl_iommu_init(struct kgsl_mmu *mmu)
 
 	atomic_set(&mmu->fault, 0);
 	iommu = kzalloc(sizeof(struct kgsl_iommu), GFP_KERNEL);
-	if (!iommu) {
-		KGSL_CORE_ERR("kzalloc(%d) failed\n",
-				sizeof(struct kgsl_iommu));
+	if (!iommu)
 		return -ENOMEM;
-	}
 
 	mmu->priv = iommu;
 	status = kgsl_get_iommu_ctxt(mmu);
