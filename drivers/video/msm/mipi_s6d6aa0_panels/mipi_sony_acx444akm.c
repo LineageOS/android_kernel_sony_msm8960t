@@ -1,6 +1,7 @@
 /* drivers/video/msm/mipi_s6d6aa0_panels/mipi_sony_acx444akm.c
  *
  * Copyright (C) [2011] Sony Ericsson Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2; as
@@ -10,7 +11,7 @@
 
 #include "../msm_fb.h"
 #include "../mipi_dsi.h"
-#include "../mipi_dsi_video_panel.h"
+#include "../mipi_dsi_panel.h"
 
 /* Display ON Sequence */
 static char exit_sleep[] = {
@@ -23,15 +24,84 @@ static char nvm_reg_access_enable2[] = {
 	0xF1, 0x5A, 0x5A
 };
 static char panel_ctrl_1[] = {
-	0xF6, 0x0B, 0x0E, 0x0D, 0x1F, 0x08, 0x00, 0x0F,
-	0x1C, 0x17, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x22, 0x1E, 0x3C, 0x30, 0x51
+	0xF6, 0x0B, 0x0F, 0x0D, 0x20, 0x09, 0x00, 0x10,
+	0x1D, 0x17, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x37, 0x33, 0x3C, 0x30, 0x51
+};
+static char p_gamma_ctl[] = {
+	0xFA,
+	/* R */
+	0x29, 0x31, 0x0D, 0x00, 0x06, 0x04, 0x00, 0x00,
+	0x0B, 0x0E, 0x0C, 0x20, 0x28, 0x2B, 0x2E, 0x34,
+	0x39, 0x3E, 0x3F, 0x3F, 0x27,
+	/* G */
+	0x00, 0x3F, 0x2C, 0x25, 0x30, 0x30, 0x28, 0x29,
+	0x2E, 0x2B, 0x22, 0x2A, 0x2F, 0x31, 0x31, 0x34,
+	0x38, 0x3E, 0x3F, 0x3F, 0x26,
+	/* B */
+	0x00, 0x3F, 0x1D, 0x1F, 0x2A, 0x29, 0x22, 0x24,
+	0x2A, 0x28, 0x20, 0x29, 0x2E, 0x30, 0x31, 0x34,
+	0x39, 0x3E, 0x3F, 0x3F, 0x26,
+};
+static char n_gamma_ctl[] = {
+	0xFB,
+	/* R */
+	0x29, 0x31, 0x0D, 0x00, 0x06, 0x04, 0x00, 0x00,
+	0x0B, 0x0E, 0x0C, 0x20, 0x28, 0x2B, 0x2E, 0x34,
+	0x39, 0x3E, 0x3F, 0x3F, 0x27,
+	/* G */
+	0x00, 0x3F, 0x2C, 0x25, 0x30, 0x30, 0x28, 0x29,
+	0x2E, 0x2B, 0x22, 0x2A, 0x2F, 0x31, 0x31, 0x34,
+	0x38, 0x3E, 0x3F, 0x3F, 0x26,
+	/* B */
+	0x00, 0x3F, 0x1D, 0x1F, 0x2A, 0x29, 0x22, 0x24,
+	0x2A, 0x28, 0x20, 0x29, 0x2E, 0x30, 0x31, 0x34,
+	0x39, 0x3E, 0x3F, 0x3F, 0x26,
+};
+static char p_gamma_ctl_eco[] = {
+	0xFA,
+	/* R */
+	0x29, 0x35, 0x11, 0x04, 0x0E, 0x0B, 0x02, 0x01,
+	0x03, 0x01, 0x01, 0x05, 0x08, 0x0A, 0x0D, 0x15,
+	0x1D, 0x26, 0x2C, 0x36, 0x1E,
+	/* G */
+	0x00, 0x35, 0x33, 0x31, 0x3C, 0x3B, 0x33, 0x30,
+	0x31, 0x2C, 0x25, 0x24, 0x24, 0x25, 0x26, 0x2C,
+	0x31, 0x37, 0x3B, 0x3F, 0x24,
+	/* B */
+	0x00, 0x35, 0x2C, 0x25, 0x34, 0x34, 0x2D, 0x2A,
+	0x2D, 0x28, 0x22, 0x22, 0x22, 0x23, 0x24, 0x2A,
+	0x30, 0x37, 0x3B, 0x3F, 0x24,
+};
+static char n_gamma_ctl_eco[] = {
+	0xFB,
+	/* R */
+	0x29, 0x35, 0x11, 0x04, 0x0E, 0x0B, 0x02, 0x01,
+	0x03, 0x01, 0x01, 0x05, 0x08, 0x0A, 0x0D, 0x15,
+	0x1D, 0x26, 0x2C, 0x36, 0x1E,
+	/* G */
+	0x00, 0x35, 0x33, 0x31, 0x3C, 0x3B, 0x33, 0x30,
+	0x31, 0x2C, 0x25, 0x24, 0x24, 0x25, 0x26, 0x2C,
+	0x31, 0x37, 0x3B, 0x3F, 0x24,
+	/* B */
+	0x00, 0x35, 0x2C, 0x25, 0x34, 0x34, 0x2D, 0x2A,
+	0x2D, 0x28, 0x22, 0x22, 0x22, 0x23, 0x24, 0x2A,
+	0x30, 0x37, 0x3B, 0x3F, 0x24,
 };
 static char display_scan_ctrl[] = {
 	0x36, 0x80
 };
+static char write_display_brightness[] = {
+	0x51, 0x00
+};
 static char write_ctrl_display[] = {
-	0x53, 0x2C
+	0x53, 0x00
+};
+static char write_cabc[] = {
+	0x55, 0x00
+};
+static char write_cabcmb[] = {
+	0x5E, 0x00
 };
 static char display_on[] = {
 	0x29
@@ -50,6 +120,33 @@ static char read_ddb_start[] = {
 	0xA1, 0x00
 };
 
+static struct dsi_cmd_desc sony_display_on_eco_cmds[] = {
+	{DTYPE_DCS_WRITE, 1, 0, 0, 140,
+		sizeof(exit_sleep), exit_sleep},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(nvm_reg_access_enable1), nvm_reg_access_enable1},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(nvm_reg_access_enable2), nvm_reg_access_enable2},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(panel_ctrl_1), panel_ctrl_1},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(p_gamma_ctl_eco), p_gamma_ctl_eco},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(n_gamma_ctl_eco), n_gamma_ctl_eco},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(display_scan_ctrl), display_scan_ctrl},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(write_display_brightness), write_display_brightness},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(write_ctrl_display), write_ctrl_display},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(write_cabc), write_cabc},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(write_cabcmb), write_cabcmb},
+	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
+		sizeof(display_on), display_on},
+};
+
 static struct dsi_cmd_desc sony_display_on_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 140,
 		sizeof(exit_sleep), exit_sleep},
@@ -60,9 +157,15 @@ static struct dsi_cmd_desc sony_display_on_cmds[] = {
 	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
 		sizeof(panel_ctrl_1), panel_ctrl_1},
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(display_scan_ctrl), display_scan_ctrl},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(write_display_brightness), write_display_brightness},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
 		sizeof(write_ctrl_display), write_ctrl_display},
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
-		sizeof(display_scan_ctrl), display_scan_ctrl},
+		sizeof(write_cabc), write_cabc},
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+		sizeof(write_cabcmb), write_cabcmb},
 	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
 		sizeof(display_on), display_on},
 };
@@ -70,12 +173,26 @@ static struct dsi_cmd_desc sony_display_on_cmds[] = {
 static struct dsi_cmd_desc sony_display_off_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
 		sizeof(display_off), display_off},
-	{DTYPE_DCS_WRITE, 1, 0, 0, 150,
+	{DTYPE_DCS_WRITE, 1, 0, 0, 130,
 		sizeof(enter_sleep), enter_sleep}
 };
 
 static struct dsi_cmd_desc read_ddb_start_cmds[] = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(read_ddb_start), read_ddb_start},
+};
+
+static struct dsi_cmd_desc sony_eco_mode_gamma_cmds[] = {
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(p_gamma_ctl_eco), p_gamma_ctl_eco},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(n_gamma_ctl_eco), n_gamma_ctl_eco},
+};
+
+static struct dsi_cmd_desc sony_normal_gamma_cmds[] = {
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(p_gamma_ctl), p_gamma_ctl},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 0,
+		sizeof(n_gamma_ctl), n_gamma_ctl},
 };
 
 static const struct mipi_dsi_phy_ctrl dsi_video_mode_phy_db[] = {
@@ -84,16 +201,16 @@ static const struct mipi_dsi_phy_ctrl dsi_video_mode_phy_db[] = {
 		/* regulator */
 		{0x03, 0x0a, 0x04, 0x00, 0x20},
 		/* timing */
-		{0xb0, 0x23, 0x1a, 0x00, 0x94, 0x93, 0x1e, 0x25,
-		 0x1d, 0x03, 0x04, 0xa0},
+		{0x7b, 0x1b, 0x12, 0x00, 0x40, 0x49, 0x17, 0x1e,
+		 0x1e, 0x03, 0x04, 0xa0},
 		/* phy ctrl */
 		{0x5f, 0x00, 0x00, 0x10},
 		/* strength */
 		{0xff, 0x00, 0x06, 0x00},
 		/* pll control */
-		{0x01, 0x91, 0x01, 0x19, 0x00, 0x40, 0x03, 0x62,
-		 0x41, 0x0f, 0x01,
-		 0x00, 0x1a, 0x00, 0x00, 0x02, 0x00, 0x20, 0x00, 0x01 },
+		{0x01, 0x9e, 0x31, 0xd9, 0x00, 0x50, 0x48, 0x63,
+		 0x41, 0x0f, 0x03,
+		 0x00, 0x14, 0x03, 0x00, 0x02, 0x00, 0x20, 0x00, 0x01 },
 	},
 };
 
@@ -111,8 +228,8 @@ static struct msm_panel_info *get_panel_info(void)
 	pinfo.lcdc.h_back_porch = 64;
 	pinfo.lcdc.h_front_porch = 64;
 	pinfo.lcdc.h_pulse_width = 16;
-	pinfo.lcdc.v_back_porch = 30;
-	pinfo.lcdc.v_front_porch = 30;
+	pinfo.lcdc.v_back_porch = 51;
+	pinfo.lcdc.v_front_porch = 51;
 	pinfo.lcdc.v_pulse_width = 4;
 	pinfo.lcdc.border_clr = 0;	/* blk */
 	pinfo.lcdc.underflow_clr = 0xff;	/* blue */
@@ -120,7 +237,7 @@ static struct msm_panel_info *get_panel_info(void)
 	pinfo.bl_max = 15;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
-	pinfo.clk_rate = 418000000;
+	pinfo.clk_rate = 431000000;
 
 	pinfo.mipi.mode = DSI_VIDEO_MODE;
 	pinfo.mipi.pulse_mode_hsa_he = TRUE;
@@ -142,11 +259,13 @@ static struct msm_panel_info *get_panel_info(void)
 	pinfo.mipi.data_lane2 = TRUE;
 	pinfo.mipi.data_lane3 = TRUE;
 	pinfo.mipi.tx_eot_append = TRUE;
-	pinfo.mipi.t_clk_post = 0x19;
-	pinfo.mipi.t_clk_pre = 0x2f;
+	pinfo.mipi.t_clk_post = 0x04;
+	pinfo.mipi.t_clk_pre = 0x1b;
 	pinfo.mipi.stream = 0; /* dma_p */
 	pinfo.mipi.mdp_trigger = DSI_CMD_TRIGGER_SW;
 	pinfo.mipi.dma_trigger = DSI_CMD_TRIGGER_SW;
+	pinfo.mipi.force_clk_lane_hs = 1;
+	pinfo.mipi.esc_byte_ratio = 4;
 	pinfo.mipi.frame_rate  = 60;
 	pinfo.mipi.dsi_phy_db =
 		(struct mipi_dsi_phy_ctrl *)dsi_video_mode_phy_db;
@@ -154,17 +273,53 @@ static struct msm_panel_info *get_panel_info(void)
 	return &pinfo;
 }
 
-static struct dsi_video_controller dsi_video_controller_panel = {
+static struct dsi_controller dsi_video_controller_panel = {
 	.get_panel_info = get_panel_info,
+	.display_on_eco_cmds = sony_display_on_eco_cmds,
 	.display_on_cmds = sony_display_on_cmds,
 	.display_off_cmds = sony_display_off_cmds,
 	.read_id_cmds = read_ddb_start_cmds,
+	.eco_mode_gamma_cmds = sony_eco_mode_gamma_cmds,
+	.normal_gamma_cmds = sony_normal_gamma_cmds,
+	.display_on_eco_cmds_size = ARRAY_SIZE(sony_display_on_eco_cmds),
 	.display_on_cmds_size = ARRAY_SIZE(sony_display_on_cmds),
 	.display_off_cmds_size = ARRAY_SIZE(sony_display_off_cmds),
+	.eco_mode_gamma_cmds_size = ARRAY_SIZE(sony_eco_mode_gamma_cmds),
+	.normal_gamma_cmds_size = ARRAY_SIZE(sony_normal_gamma_cmds),
+};
+
+static char ddb_val_1b[] = {
+	0x81, 0x73, 0x1b, 0x01, 0xff
+};
+
+static char ddb_val_1c[] = {
+	0x81, 0x73, 0x1c, 0x01, 0xff
 };
 
 static char ddb_val[] = {
-	0x81, 0x73, 0x1b, 0x01, 0xff
+	0x81, 0x73, 0xff, 0x01, 0xff
+};
+
+static char default_ddb_val[] = {
+	0x81, 0x73
+};
+
+const struct panel_id sony_acx444akm_panel_id_1b = {
+	.name = "mipi_video_sony_wxga_acx444akm_id_1b",
+	.pctrl = &dsi_video_controller_panel,
+	.id = ddb_val_1b,
+	.id_num = ARRAY_SIZE(ddb_val_1b),
+	.width = 57,
+	.height = 101,
+};
+
+const struct panel_id sony_acx444akm_panel_id_1c = {
+	.name = "mipi_video_sony_wxga_acx444akm_id_1c",
+	.pctrl = &dsi_video_controller_panel,
+	.id = ddb_val_1c,
+	.id_num = ARRAY_SIZE(ddb_val_1c),
+	.width = 57,
+	.height = 101,
 };
 
 const struct panel_id sony_acx444akm_panel_id = {
@@ -172,4 +327,15 @@ const struct panel_id sony_acx444akm_panel_id = {
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val,
 	.id_num = ARRAY_SIZE(ddb_val),
+	.width = 57,
+	.height = 101,
+};
+
+const struct panel_id sony_acx444akm_panel_default = {
+	.name = "mipi_sony_panel",
+	.pctrl = &dsi_video_controller_panel,
+	.id = default_ddb_val,
+	.id_num = ARRAY_SIZE(default_ddb_val),
+	.width = 57,
+	.height = 101,
 };

@@ -481,7 +481,8 @@ static int sony_eeprom_load(struct msm_sensor_ctrl_t *s_ctrl)
 	}
 
 	/* workaround solution to identify Cobalt RGBW module and RGB module */
-	if (strncmp((char *)d, "SOI08BS2", 8) == 0 && (d[0x013] == 0 || d[0x013] == 1)) {
+	if (strncmp((char *)d, "SOI08BS2", 8) == 0
+			&& (d[0x013] == 0 || d[0x013] == 1)) {
 			d[0x000] = 'S';
 			d[0x001] = 'M';
 			d[0x002] = 'C';
@@ -619,7 +620,7 @@ static int32_t sony_sensor_set_fps(struct msm_sensor_ctrl_t *s_ctrl,
 }
 
 static int32_t sony_sensor_write_exp_gain1(struct msm_sensor_ctrl_t *s_ctrl,
-		uint16_t gain, uint32_t line)
+		uint16_t temp1, uint32_t temp2, int32_t temp3, uint16_t temp4)
 {
 	return 0;
 }
@@ -1151,6 +1152,10 @@ static struct msm_sensor_fn_t sony_sensor_func_tbl = {
 	.sensor_match_id		= sony_sensor_match_id,
 	.sensor_adjust_frame_lines	= sony_sensor_adjust_frame_lines,
 	.sensor_get_csi_params		= sony_sensor_get_csi_params,
+	.sensor_set_vision_mode         = NULL,
+	.sensor_set_vision_ae_control   = NULL,
+	.sensor_read_eeprom             = NULL,
+	.sensor_hdr_update              = NULL,
 };
 
 static struct msm_sensor_reg_t sony_sensor_regs[] = {

@@ -13,8 +13,6 @@
  * of the License, or (at your option) any later version.
  */
 
-/* #define DEBUG */
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -31,21 +29,14 @@
 #include <linux/ctype.h>
 
 #include "msm_fb.h"
-#include <video/mipi_dsi_panel.h>
 #include "mipi_dsi.h"
-#include "mipi_dsi_panel_driver.h"
+#include "mipi_dsi_panel.h"
 
 static char *res_buf;
 static int buf_sz;
 
 #define TMP_BUF_SZ 128
 #define MAX_WRITE_DATA 100
-
-#ifdef CONFIG_FB_MSM_MDP303
-#define DSI_VIDEO_BASE	0xF0000 /* Taken from mdp_dma_dsi_video.c */
-#else
-#define DSI_VIDEO_BASE	0xE0000 /* Taken from mdp4_overlay_dsi_video.c */
-#endif
 
 enum dbg_cmd_type {
 	DCS,
@@ -72,111 +63,84 @@ static void reset_res_buf(void)
 	buf_sz = 0;
 }
 
-static void print_cmds2file(const struct panel_cmd *pcmd, struct seq_file *s)
+static void print_cmds2file(const struct dsi_cmd_desc *dsi, int cmds_size,
+				struct seq_file *s)
 {
-	int n, i, j;
-	struct dsi_cmd_desc dsi;
+	int i=0, j;
 
-	if (!pcmd) {
+	if (!dsi) {
 		seq_printf(s, "---------\n");
 		goto exit;
 	}
 
-	for (n = 0; ; ++n) {
-		switch (pcmd[n].type) {
-		case CMD_END:
-			seq_printf(s, "---------\n");
-			goto exit;
+	for (i = 0; i < cmds_size; i++) {
+		switch (dsi[i].dtype) {
+		case DTYPE_GEN_WRITE:
+			seq_printf(s, "DTYPE_GEN_WRITE: ");
 			break;
-		case CMD_WAIT_MS:
-			seq_printf(s, "CMD_WAIT_MS: %d ms\n",
-							pcmd[n].payload.data);
+		case DTYPE_GEN_WRITE1:
+			seq_printf(s, "DTYPE_GEN_WRITE1: ");
 			break;
-		case CMD_DSI:
-			for (i = 0; i < pcmd[n].payload.dsi_payload.cnt; i++) {
-				dsi = pcmd[n].payload.dsi_payload.dsi[i];
-				switch (dsi.dtype) {
-				case DTYPE_GEN_WRITE:
-					seq_printf(s, "DTYPE_GEN_WRITE: ");
-					break;
-				case DTYPE_GEN_WRITE1:
-					seq_printf(s, "DTYPE_GEN_WRITE1: ");
-					break;
-				case DTYPE_GEN_WRITE2:
-					seq_printf(s, "DTYPE_GEN_WRITE2: ");
-					break;
-				case DTYPE_GEN_LWRITE:
-					seq_printf(s, "DTYPE_GEN_LWRITE: ");
-					break;
-				case DTYPE_GEN_READ:
-					seq_printf(s, "DTYPE_GEN_READ: ");
-					break;
-				case DTYPE_GEN_READ1:
-					seq_printf(s, "DTYPE_GEN_READ1: ");
-					break;
-				case DTYPE_GEN_READ2:
-					seq_printf(s, "DTYPE_GEN_READ2: ");
-					break;
-				case DTYPE_DCS_LWRITE:
-					seq_printf(s, "DTYPE_DCS_LWRITE: ");
-					break;
-				case DTYPE_DCS_WRITE:
-					seq_printf(s, "DTYPE_DCS_WRITE: ");
-					break;
-				case DTYPE_DCS_WRITE1:
-					seq_printf(s, "DTYPE_DCS_WRITE1: ");
-					break;
-				case DTYPE_DCS_READ:
-					seq_printf(s, "DTYPE_DCS_READ: ");
-					break;
-				case DTYPE_MAX_PKTSIZE:
-					seq_printf(s, "DTYPE_MAX_PKTSIZE: ");
-					break;
-				case DTYPE_NULL_PKT:
-					seq_printf(s, "DTYPE_NULL_PKT: ");
-					break;
-				case DTYPE_BLANK_PKT:
-					seq_printf(s, "DTYPE_BLANK_PKT: ");
-					break;
-				case DTYPE_CM_ON:
-					seq_printf(s, "DTYPE_CM_ON: ");
-					break;
-				case DTYPE_CM_OFF:
-					seq_printf(s, "DTYPE_CM_OFF: ");
-					break;
-				case DTYPE_PERIPHERAL_ON:
-					seq_printf(s, "DTYPE_PERIPHERAL_ON: ");
-					break;
-				case DTYPE_PERIPHERAL_OFF:
-					seq_printf(s, "DTYPE_PERIPHERAL_OFF: ");
-					break;
-				default:
-					seq_printf(s, "Unknown dtype: 0x%x: ",
-								dsi.dtype);
-				}
-				seq_printf(s, "last = %d, vc = %d, ack = %d, ",
-						dsi.last, dsi.vc, dsi.ack);
-				seq_printf(s, "wait = %d, dlen = %d\npayload: ",
-						dsi.wait, dsi.dlen);
-
-				for (j = 0; j < dsi.dlen; j++)
-					seq_printf(s, "0x%.2x ",
-								dsi.payload[j]);
-				seq_printf(s, "\n");
-			}
+		case DTYPE_GEN_WRITE2:
+			seq_printf(s, "DTYPE_GEN_WRITE2: ");
 			break;
-		case CMD_RESET:
-			seq_printf(s, "CMD_RESET: data: %d\n",
-							pcmd[n].payload.data);
+		case DTYPE_GEN_LWRITE:
+			seq_printf(s, "DTYPE_GEN_LWRITE: ");
 			break;
-		case CMD_PLATFORM:
-			seq_printf(s, "CMD_PLATFORM: data: %d\n",
-							pcmd[n].payload.data);
+		case DTYPE_GEN_READ:
+			seq_printf(s, "DTYPE_GEN_READ: ");
+			break;
+		case DTYPE_GEN_READ1:
+			seq_printf(s, "DTYPE_GEN_READ1: ");
+			break;
+		case DTYPE_GEN_READ2:
+			seq_printf(s, "DTYPE_GEN_READ2: ");
+			break;
+		case DTYPE_DCS_LWRITE:
+			seq_printf(s, "DTYPE_DCS_LWRITE: ");
+			break;
+		case DTYPE_DCS_WRITE:
+			seq_printf(s, "DTYPE_DCS_WRITE: ");
+			break;
+		case DTYPE_DCS_WRITE1:
+			seq_printf(s, "DTYPE_DCS_WRITE1: ");
+			break;
+		case DTYPE_DCS_READ:
+			seq_printf(s, "DTYPE_DCS_READ: ");
+			break;
+		case DTYPE_MAX_PKTSIZE:
+			seq_printf(s, "DTYPE_MAX_PKTSIZE: ");
+			break;
+		case DTYPE_NULL_PKT:
+			seq_printf(s, "DTYPE_NULL_PKT: ");
+			break;
+		case DTYPE_BLANK_PKT:
+			seq_printf(s, "DTYPE_BLANK_PKT: ");
+			break;
+		case DTYPE_CM_ON:
+			seq_printf(s, "DTYPE_CM_ON: ");
+			break;
+		case DTYPE_CM_OFF:
+			seq_printf(s, "DTYPE_CM_OFF: ");
+			break;
+		case DTYPE_PERIPHERAL_ON:
+			seq_printf(s, "DTYPE_PERIPHERAL_ON: ");
+			break;
+		case DTYPE_PERIPHERAL_OFF:
+			seq_printf(s, "DTYPE_PERIPHERAL_OFF: ");
 			break;
 		default:
-			seq_printf(s, "UNKNOWN CMD: 0x%.2x data: %d\n",
-					pcmd[n].type, pcmd[n].payload.data);
+			seq_printf(s, "Unknown dtype: 0x%x: ",
+						dsi[i].dtype);
 		}
+		seq_printf(s, "last = %d, vc = %d, ack = %d, ",
+				dsi[i].last, dsi[i].vc, dsi[i].ack);
+		seq_printf(s, "wait = %d, dlen = %d\npayload: ",
+				dsi[i].wait, dsi[i].dlen);
+
+		for (j = 0; j < dsi[i].dlen; j++)
+			seq_printf(s, "0x%.2x ", dsi[i].payload[j]);
+		seq_printf(s, "\n");
 	}
 exit:
 	return;
@@ -195,31 +159,45 @@ static int info_show(struct seq_file *s, void *unused)
 		return 0;
 	}
 
-	if (dsi_data->panel->name) {
-		seq_printf(s, "Panel: %s\n", dsi_data->panel->name);
-		seq_printf(s, "xres = %d, yres = %d\n",
-					dsi_data->panel_data.panel_info.xres,
-					dsi_data->panel_data.panel_info.yres);
-		seq_printf(s, "width = %d mm, height = %d mm\n",
-					dsi_data->panel->width,
-					dsi_data->panel->height);
-		seq_printf(s, "---------\n");
-		if (dsi_data->panel->pctrl) {
-			seq_printf(s, "display_init commands:\n");
-			print_cmds2file(dsi_data->panel->pctrl->display_init,
-									s);
-			seq_printf(s, "display_on commands:\n");
-			print_cmds2file(dsi_data->panel->pctrl->display_on, s);
-			seq_printf(s, "display_off commands:\n");
-			print_cmds2file(dsi_data->panel->pctrl->display_off, s);
-			seq_printf(s, "read_id commands:\n");
-			print_cmds2file(dsi_data->panel->pctrl->read_id, s);
-		} else {
-			seq_printf(s, "No pctrl\n");
-		}
-	} else {
+	if (!dsi_data->panel->name) {
 		seq_printf(s, "No panel name\n");
+		goto exit;
 	}
+
+	seq_printf(s, "Panel: %s\n", dsi_data->panel->name);
+	seq_printf(s, "xres = %d, yres = %d\n",
+				dsi_data->panel_data.panel_info.xres,
+				dsi_data->panel_data.panel_info.yres);
+	seq_printf(s, "width = %d mm, height = %d mm\n",
+				dsi_data->panel->width,
+				dsi_data->panel->height);
+	seq_printf(s, "---------\n");
+
+	if (!dsi_data->panel->pctrl) {
+		seq_printf(s, "No pctrl\n");
+		goto exit;
+	}
+	seq_printf(s, "display_init commands:\n");
+	print_cmds2file(dsi_data->panel->pctrl->display_init_cmds,
+			dsi_data->panel->pctrl->display_init_cmds_size, s);
+	seq_printf(s, "display_on_eco_cmds commands:\n");
+	print_cmds2file(dsi_data->panel->pctrl->display_on_eco_cmds,
+			dsi_data->panel->pctrl->display_on_eco_cmds_size, s);
+	seq_printf(s, "display_on commands:\n");
+	print_cmds2file(dsi_data->panel->pctrl->display_on_cmds,
+			dsi_data->panel->pctrl->display_on_cmds_size, s);
+	seq_printf(s, "display_off commands:\n");
+	print_cmds2file(dsi_data->panel->pctrl->display_off_cmds,
+			dsi_data->panel->pctrl->display_off_cmds_size, s);
+	seq_printf(s, "read_id commands (size 1):\n");
+	print_cmds2file(dsi_data->panel->pctrl->read_id_cmds, 1, s);
+	seq_printf(s, "eco_mode_gamma commands:\n");
+	print_cmds2file(dsi_data->panel->pctrl->eco_mode_gamma_cmds,
+			dsi_data->panel->pctrl->eco_mode_gamma_cmds_size, s);
+	seq_printf(s, "normal_gamma commands:\n");
+	print_cmds2file(dsi_data->panel->pctrl->normal_gamma_cmds,
+			dsi_data->panel->pctrl->normal_gamma_cmds_size, s);
+exit:
 	return 0;
 }
 
@@ -321,7 +299,6 @@ static int setup_reg_access(struct device *dev, struct dsi_buf *rx_buf,
 
 	if (copy_from_user(*buf, ubuf, count)) {
 		ret = -EFAULT;
-                kfree(*buf);
 		goto fail_free_all;
 	}
 	return 0;
@@ -329,6 +306,7 @@ static int setup_reg_access(struct device *dev, struct dsi_buf *rx_buf,
 fail_free_all:
 	if (tx_buf)
 		mipi_dsi_buf_release(tx_buf);
+	kfree(*buf);
 fail_free_rx:
 	if (rx_buf)
 		mipi_dsi_buf_release(rx_buf);
@@ -360,8 +338,9 @@ static int get_parameters(const char *p, u8 *par_buf, int par_buf_size,
 		} else {
 			if (sscanf(p, "%4hhx", &par_buf[*nbr_params]) == 1) {
 				(*nbr_params)++;
-				while (isxdigit(*p) || (*p == 'x'))
+				while (isxdigit(*p) || (*p == 'x')) {
 					p++;
+				}
 			}
 		}
 		if (*nbr_params > par_buf_size) {
@@ -374,80 +353,6 @@ static int get_parameters(const char *p, u8 *par_buf, int par_buf_size,
 	}
 exit:
 	return ret;
-}
-
-static int prepare_for_reg_access(struct msm_fb_data_type *mfd,
-				  enum power_state *old_state)
-{
-	struct device *dev = &mfd->panel_pdev->dev;
-	struct mipi_dsi_data *dsi_data;
-	int ret = 0;
-
-	dsi_data = platform_get_drvdata(mfd->panel_pdev);
-
-	/* Needed to make sure the display stack isn't powered on/off while */
-	/* we are executing. The best solution would be a read/write function */
-	/* that handles the current power state */
-	mutex_lock(&mfd->power_lock);
-
-	if (mfd->panel_power_on) {
-		dev_dbg(dev, "%s: panel is on, don't do anything\n", __func__);
-	} else {
-		dev_dbg(dev, "%s: panel is NOT on, power on stack\n", __func__);
-
-		mutex_lock(&dsi_data->lock);
-		*old_state = dsi_data->panel_state;
-		dsi_data->panel_state = DEBUGFS_POWER_OFF;
-		mutex_unlock(&dsi_data->lock);
-
-		ret = panel_next_on(mfd->pdev); /* msm_fb_dev */
-		if (ret) {
-			mutex_unlock(&mfd->power_lock);
-			goto exit;
-		}
-	}
-
-	mutex_lock(&mfd->dma->ov_mutex);
-	/* This should not be needed, but without this we sometimes don't get an
-	 * interrupt when transmitting the command */
-	if (mfd->panel_info.mipi.mode == DSI_VIDEO_MODE) {
-		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-		MDP_OUTP(MDP_BASE + DSI_VIDEO_BASE, 0);
-		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
-		msleep(20);
-		mipi_dsi_controller_cfg(0);
-		mipi_dsi_op_mode_config(DSI_CMD_MODE);
-	}
-exit:
-	return ret;
-}
-
-static void post_reg_access(struct msm_fb_data_type *mfd,
-			    enum power_state old_state)
-{
-	struct mipi_dsi_data *dsi_data;
-
-	dsi_data = platform_get_drvdata(mfd->panel_pdev);
-
-	/* This should not be needed, but without this we sometimes don't get an
-	 * interrupt when transmitting the command */
-	if (mfd->panel_info.mipi.mode == DSI_VIDEO_MODE) {
-		mipi_dsi_op_mode_config(DSI_VIDEO_MODE);
-		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-		mipi_dsi_sw_reset();
-		mipi_dsi_controller_cfg(1);
-		MDP_OUTP(MDP_BASE + DSI_VIDEO_BASE, 1);
-		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
-	}
-	mutex_unlock(&mfd->dma->ov_mutex);
-
-	if (dsi_data->panel_state == DEBUGFS_POWER_ON) {
-		(void)panel_next_off(mfd->pdev);
-		mutex_lock(&dsi_data->lock);
-		dsi_data->panel_state = old_state;
-		mutex_unlock(&dsi_data->lock);
-	}
-	mutex_unlock(&mfd->power_lock);
 }
 
 static ssize_t reg_read(struct file *file, const char __user *ubuf,
@@ -467,7 +372,6 @@ static ssize_t reg_read(struct file *file, const char __user *ubuf,
 	struct dsi_buf tx_buf;
 	struct dsi_buf rx_buf;
 	struct dsi_cmd_desc dsi;
-	enum power_state old_state = PANEL_OFF;
 
 	dev = &mfd->panel_pdev->dev;
 	dev_dbg(dev, "%s\n", __func__);
@@ -502,7 +406,7 @@ static ssize_t reg_read(struct file *file, const char __user *ubuf,
 	if (ret)
 		goto fail_free_all;
 
-	ret = prepare_for_reg_access(mfd, &old_state);
+	ret = prepare_for_reg_access(mfd);
 	if (ret)
 		goto fail_free_all;
 
@@ -524,15 +428,14 @@ static ssize_t reg_read(struct file *file, const char __user *ubuf,
 	dsi.dlen = i;
 	dsi.payload = params;
 
-	dev_dbg(dev, "dtype = %d, last = %d, vc = %d\n",
-			dsi.dtype, dsi.last, dsi.vc);
-	dev_dbg(dev, "ack = %d, wait = %d, dlen = %d\n",
-			dsi.ack, dsi.wait, dsi.dlen);
+	dev_dbg(dev, "dtype = %d, last = %d, vc = %d, ack = %d, wait = %d, "
+		"dlen = %d\n", dsi.dtype, dsi.last, dsi.vc, dsi.ack, dsi.wait,
+		dsi.dlen);
 	for (j = 0; j < i; j++)
 		dev_dbg(dev, "payload[%d] = 0x%x\n", j, dsi.payload[j]);
 
 	mipi_dsi_cmds_rx(mfd, &tx_buf, &rx_buf, &dsi, nbr_bytes_to_read);
-	post_reg_access(mfd, old_state);
+	post_reg_access(mfd);
 	print_params(dsi.dtype, params[0], rx_buf.len, rx_buf.data);
 
 fail_free_all:
@@ -558,7 +461,6 @@ static ssize_t reg_write(struct file *file, const char __user *ubuf,
 	int ret;
 	struct dsi_buf tx_buf;
 	struct dsi_cmd_desc dsi;
-	enum power_state old_state = PANEL_OFF;
 
 	dev = &mfd->panel_pdev->dev;
 	dev_dbg(dev, "%s\n", __func__);
@@ -590,7 +492,7 @@ static ssize_t reg_write(struct file *file, const char __user *ubuf,
 	if (ret)
 		goto fail_free_all;
 
-	ret = prepare_for_reg_access(mfd, &old_state);
+	ret = prepare_for_reg_access(mfd);
 	if (ret)
 		goto fail_free_all;
 
@@ -626,7 +528,7 @@ static ssize_t reg_write(struct file *file, const char __user *ubuf,
 		dev_dbg(dev, "payload[%d] = 0x%x\n", j, dsi.payload[j]);
 	mipi_dsi_cmds_tx(&tx_buf, &dsi, 1);
 
-	post_reg_access(mfd, old_state);
+	post_reg_access(mfd);
 	print_params(dsi.dtype, data[0], i, dsi.payload);
 
 fail_free_all:
@@ -667,24 +569,31 @@ static int result_show(struct seq_file *s, void *unused)
 	return 0;
 }
 
-static int reset(struct file *file, const char __user *ubuf,
+#ifdef CONFIG_FB_MSM_RECOVER_PANEL
+static int recover_nvm_write(struct file *file, const char __user *ubuf,
 						size_t count, loff_t *ppos)
 {
 	struct seq_file *s = file->private_data;
 	struct msm_fb_data_type *mfd = s->private;
 	struct device *dev;
-	long level;
 	int ret = 0;
 	char *buf;
 	struct mipi_dsi_data *dsi_data;
+	const char *p;
+	u8 data[MAX_WRITE_DATA];
+	int i = 0, j;
+	struct dsi_nvm_rewrite_ctl *pnvrw_ctl;
 
 	reset_res_buf();
 	dsi_data = platform_get_drvdata(mfd->panel_pdev);
+
 	dev = &mfd->panel_pdev->dev;
-	if (!dsi_data->lcd_reset) {
+
+	if (!dsi_data && !dsi_data->panel && !dsi_data->panel->pnvrw_ctl) {
 		ret = -EFAULT;
 		goto exit;
 	}
+	pnvrw_ctl = dsi_data->panel->pnvrw_ctl;
 
 	buf = kzalloc(sizeof(char) * count, GFP_KERNEL);
 	if (!buf) {
@@ -694,36 +603,121 @@ static int reset(struct file *file, const char __user *ubuf,
 
 	if (copy_from_user(buf, ubuf, count)) {
 		ret = -EFAULT;
-		goto fail_free_all;
+		goto fail_free;
 	}
 
-	/* Get parameter */
-	if (kstrtol(buf, 10, &level) < 0) {
-		update_res_buf("Reset - parameter error\n");
-		ret = -EINVAL;
-		goto fail_free_all;
-	}
-
-	if (level != 0 && level != 1) {
-		update_res_buf("Reset - parameter error\n");
-		ret = -EINVAL;
-		goto fail_free_all;
-	}
-
-	ret = dsi_data->lcd_reset(level);
+	p = buf;
+	ret = get_parameters(p, data, ARRAY_SIZE(data) - 1, &i);
 	if (ret)
-		goto fail_free_all;
-	update_res_buf("Reset succeeded\n");
-	dev_info(dev, "%s: Display reset performed.\n", __func__);
-fail_free_all:
+		goto fail_free;
+
+	if (i != 0) {
+		if (i == pnvrw_ctl->nvm_e7_nbr_params + 1) {
+			if (data[0] != 0xE7) {
+				update_res_buf("recover_nvm, param not E7\n");
+				ret = -EINVAL;
+				goto fail_free;
+			}
+			/* override E7 register data */
+			for (j = 0; j < pnvrw_ctl->nvm_e7_nbr_params; j++)
+				pnvrw_ctl->nvm_e7[j + 1] = data[j + 1];
+		} else if (i == pnvrw_ctl->nvm_de_nbr_params + 1) {
+			if (data[0] != 0xDE) {
+				update_res_buf("recover_nvm, param not DE\n");
+				ret = -EINVAL;
+				goto fail_free;
+			}
+			/* override DE register data */
+			for (j = 0; j < pnvrw_ctl->nvm_de_nbr_params; j++)
+				pnvrw_ctl->nvm_de[j + 1] = data[j + 1];
+		} else if (i == pnvrw_ctl->nvm_e7_nbr_params +
+					pnvrw_ctl->nvm_de_nbr_params + 2) {
+			if ((data[pnvrw_ctl->nvm_e7_nbr_params + 1] != 0xDE) &&
+							(data[0] != 0xE7)) {
+				update_res_buf("recover_nvm, param error\n");
+				ret = -EINVAL;
+				goto fail_free;
+			}
+			/* override E7 register data */
+			for (j = 0; j < pnvrw_ctl->nvm_e7_nbr_params; j++)
+				pnvrw_ctl->nvm_e7[j + 1] = data[j + 1];
+			/* override DE register data */
+			for (j = 0; j < pnvrw_ctl->nvm_de_nbr_params; j++)
+				pnvrw_ctl->nvm_de[j + 1] =
+					data[1 + pnvrw_ctl->nvm_e7_nbr_params +
+									1 + j];
+		} else {
+			update_res_buf("recover_nvm, wrong nbr of params\n");
+			ret = -EINVAL;
+			goto fail_free;
+		}
+	}
+
+	ret = prepare_for_reg_access(mfd);
+	if (ret)
+		goto fail_free;
+
+	mipi_set_tx_power_mode(1);
+
+	if (dsi_data->nvm_erase_all)
+		if (dsi_data->nvm_erase_all(mfd))
+			ret = -1;
+	if (dsi_data->nvm_write_trim_area)
+		if (dsi_data->nvm_write_trim_area(mfd))
+			ret = -1;
+	if (dsi_data->nvm_write_user_area)
+		if (dsi_data->nvm_write_user_area(mfd))
+			ret = -1;
+
+	if (dsi_data->panel_data.on)
+		dsi_data->panel_data.on(mfd->pdev);
+
+	post_reg_access(mfd);
+fail_free:
 	kfree(buf);
 exit:
-	if (ret) {
-		dev_err(dev, "%s: Reset failed, ret = 0x%x\n", __func__, ret);
-		update_res_buf("Reset failed\n");
-	}
+	if (ret)
+		update_res_buf("recover_nvm failed\n");
+	else
+		update_res_buf("recover_nvm sucess\n");
 	return count;
 }
+
+static int break_nvm_write(struct file *file, const char __user *ubuf,
+						size_t count, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct msm_fb_data_type *mfd = s->private;
+	int ret = 0;
+	struct mipi_dsi_data *dsi_data;
+
+	reset_res_buf();
+	dsi_data = platform_get_drvdata(mfd->panel_pdev);
+	if (!dsi_data) {
+		ret = -EFAULT;
+		goto exit;
+	}
+
+	ret = prepare_for_reg_access(mfd);
+	if (ret)
+		goto exit;
+
+	mipi_set_tx_power_mode(1);
+
+	if (dsi_data->nvm_erase_all) {
+		ret = dsi_data->nvm_erase_all(mfd);
+	}
+	post_reg_access(mfd);
+	dsi_data->lcd_reset(1);
+	dsi_data->lcd_power(1);
+exit:
+	if (ret)
+		update_res_buf("break_nvm failed\n");
+	else
+		update_res_buf("break_nvm sucess\n");
+	return count;
+}
+#endif /* CONFIG_FB_MSM_RECOVER_PANEL */
 
 static int info_open(struct inode *inode, struct file *file)
 {
@@ -790,24 +784,42 @@ static const struct file_operations result_fops = {
 	.release	= single_release,
 };
 
-static int reset_open(struct inode *inode, struct file *file)
+#ifdef CONFIG_FB_MSM_RECOVER_PANEL
+
+static int recover_nvm_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, NULL, inode->i_private);
 }
 
-static const struct file_operations reset_fops = {
-	.owner		= THIS_MODULE,
-	.open		= reset_open,
-	.write		= reset,
-	.llseek		= seq_lseek,
-	.release	= single_release,
+static const struct file_operations recover_nvm_fops = {
+	.owner			= THIS_MODULE,
+	.open			= recover_nvm_open,
+	.write			= recover_nvm_write,
+	.llseek			= seq_lseek,
+	.release		= single_release,
 };
 
-void __devinit mipi_dsi_panel_create_debugfs(struct platform_device *pdev)
+static int break_nvm_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, NULL, inode->i_private);
+}
+
+static const struct file_operations break_nvm_fops = {
+	.owner			= THIS_MODULE,
+	.open			= break_nvm_open,
+	.write			= break_nvm_write,
+	.llseek			= seq_lseek,
+	.release		= single_release,
+};
+#endif /* CONFIG_FB_MSM_RECOVER_PANEL */
+
+void __devinit mipi_dsi_panel_create_debugfs(struct platform_device *pdev,
+						const char *sub_name)
 {
 	struct mipi_dsi_data *dsi_data;
 	struct device *dev;
 	struct msm_fb_data_type *mfd;
+	struct dentry *root;
 
 	if (!pdev) {
 		pr_err("%s: no device\n", __func__);
@@ -836,48 +848,64 @@ void __devinit mipi_dsi_panel_create_debugfs(struct platform_device *pdev)
 		return;
 	}
 
-	dev_info(dev, "%s: create folder %s\n", __func__,
-						kobject_name(&dev->kobj));
-	dsi_data->dir = debugfs_create_dir(kobject_name(&dev->kobj), 0);
-	if (!dsi_data->dir) {
+	root = msm_fb_get_debugfs_root();
+	dsi_data->panel_driver_ic_dir = debugfs_create_dir(sub_name, root);
+	if (!dsi_data->panel_driver_ic_dir) {
 		dev_err(dev, "%s: dbgfs create dir failed\n", __func__);
 	} else {
-		if (!debugfs_create_file("info", S_IRUGO, dsi_data->dir, mfd,
-								&info_fops)) {
+		if (!debugfs_create_file("info", S_IRUGO,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&info_fops)) {
 			dev_err(dev, "%s: failed to create dbgfs info file\n",
 								__func__);
 			return;
 		}
-		if (!debugfs_create_file("read", S_IWUSR, dsi_data->dir, mfd,
-								&read_fops)) {
+		if (!debugfs_create_file("read", S_IWUSR,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&read_fops)) {
 			dev_err(dev, "%s: failed to create dbgfs read file\n",
 								__func__);
 			return;
 		}
-		if (!debugfs_create_file("write", S_IWUSR, dsi_data->dir, mfd,
-								&write_fops)) {
+		if (!debugfs_create_file("write", S_IWUSR,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&write_fops)) {
 			dev_err(dev, "%s: failed to create dbgfs write file\n",
 								__func__);
 			return;
 		}
-		if (!debugfs_create_file("panels", S_IRUGO, dsi_data->dir, mfd,
-							&panels_fops)) {
+		if (!debugfs_create_file("panels", S_IRUGO,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&panels_fops)) {
 			dev_err(dev, "%s: failed to create dbgfs panels file\n",
 								__func__);
 			return;
 		}
-		if (!debugfs_create_file("result", S_IRUGO, dsi_data->dir, mfd,
-								&result_fops)) {
+		if (!debugfs_create_file("result", S_IRUGO,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&result_fops)) {
 			dev_err(dev, "%s: failed to create dbgfs result file\n",
 								__func__);
 			return;
 		}
-		if (!debugfs_create_file("reset", S_IWUSR, dsi_data->dir, mfd,
-								&reset_fops)) {
-			dev_err(dev, "%s: failed to create dbgfs reset file\n",
-								__func__);
+#ifdef CONFIG_FB_MSM_RECOVER_PANEL
+		if (!debugfs_create_file("recover_nvm", S_IWUSR,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&recover_nvm_fops)) {
+			dev_err(&pdev->dev,
+				"%s: failed to create dbgfs recover_nvm\n",
+				__func__);
 			return;
 		}
+		if (!debugfs_create_file("break_nvm", S_IWUSR,
+					dsi_data->panel_driver_ic_dir, mfd,
+					&break_nvm_fops)) {
+			dev_err(&pdev->dev,
+				"%s: failed to create dbgfs break_nvm\n",
+				__func__);
+			return;
+		}
+#endif
 	}
 }
 
@@ -895,5 +923,5 @@ void __devexit mipi_dsi_panel_remove_debugfs(struct platform_device *pdev)
 		pr_err("%s: no dsi_data\n", __func__);
 		return;
 	}
-	debugfs_remove_recursive(dsi_data->dir);
+	debugfs_remove_recursive(dsi_data->panel_driver_ic_dir);
 }

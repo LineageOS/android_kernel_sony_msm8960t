@@ -62,6 +62,9 @@ extern struct platform_device msm8960_device_uart_gsbi5;
 extern struct platform_device msm8960_device_uart_gsbi8;
 extern struct platform_device msm8930_device_uart_gsbi10;
 extern struct platform_device msm8930_device_uart_gsbi11;
+#ifdef CONFIG_MSM_GSBI12_UART
+extern struct platform_device msm8960_device_uart_gsbi12;
+#endif
 extern struct platform_device msm8960_device_ssbi_pmic;
 extern struct platform_device msm8960_device_qup_i2c_gsbi3;
 extern struct platform_device msm8960_device_qup_i2c_gsbi4;
@@ -472,3 +475,5 @@ extern struct platform_device bmdm_8064_device;
 
 extern struct platform_device sglte_mdm_8064_device;
 extern struct platform_device sglte2_qsc_8064_device;
+
+extern struct dev_avtimer_data dev_avtimer_pdata;

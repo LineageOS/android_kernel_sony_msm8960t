@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -75,6 +75,11 @@
 #define MAX_NUM_JPEG_DEV 3
 #define MAX_NUM_CPP_DEV 1
 #define MAX_NUM_CCI_DEV 1
+
+/*AVTimer*/
+#define AVTIMER_MSW_PHY_ADDR  0x2800900C
+#define AVTIMER_LSW_PHY_ADDR  0x28009008
+#define AVTIMER_ITERATION_CTR 16
 
 /* msm queue management APIs*/
 
@@ -154,7 +159,7 @@ enum msm_camera_v4l2_subdev_notify {
 	NOTIFY_VFE_MSG_STATS,  /* arg = struct isp_msg_stats */
 	NOTIFY_VFE_MSG_COMP_STATS, /* arg = struct msm_stats_buf */
 	NOTIFY_VFE_BUF_EVT, /* arg = struct msm_vfe_resp */
-	NOTIFY_VFE_ERROR,
+	NOTIFY_VFE_CAMIF_ERROR,
 	NOTIFY_VFE_PIX_SOF_COUNT, /*arg = int*/
 	NOTIFY_AXI_RDI_SOF_COUNT, /*arg = struct rdi_count_msg*/
 	NOTIFY_PCLK_CHANGE, /* arg = pclk */
@@ -210,11 +215,13 @@ struct msm_cam_return_frame_info {
 	int dirty;
 	int node_type;
 	struct timeval timestamp;
+	uint32_t frame_id;
 };
 
 struct msm_cam_timestamp {
 	uint8_t present;
 	struct timeval timestamp;
+	uint32_t frame_id;
 };
 
 struct msm_cam_buf_map_info {
@@ -357,6 +364,10 @@ struct msm_cam_v4l2_dev_inst {
 	int vbqueue_initialized;
 	struct mutex inst_lock;
 	uint32_t inst_handle;
+	uint32_t sequence;
+	uint8_t avtimerOn;
+	void __iomem *p_avtimer_msw;
+	void __iomem *p_avtimer_lsw;
 };
 
 struct msm_cam_mctl_node {
@@ -680,6 +691,8 @@ struct msm_frame_buffer *msm_mctl_buf_find(
 	struct msm_cam_v4l2_dev_inst *pcam_inst, int del_buf,
 	struct msm_free_buf *fbuf);
 void msm_mctl_gettimeofday(struct timeval *tv);
+void msm_mctl_getAVTimer(struct msm_cam_v4l2_dev_inst *pcam_inst,
+        struct timeval *tv);
 int msm_mctl_check_pp(struct msm_cam_media_controller *p_mctl,
 	int msg_type, int *pp_divert_type, int *pp_type);
 int msm_mctl_do_pp_divert(

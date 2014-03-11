@@ -5201,6 +5201,7 @@ void sitar_get_z(struct snd_soc_codec *codec , s16 *dce_z, s16 *sta_z)
 	snd_soc_write(codec, SITAR_A_MBHC_SCALING_MUX_1, 0x81);
 	reg1 = snd_soc_read(codec, SITAR_A_MICB_2_MBHC);
 	snd_soc_update_bits(codec, SITAR_A_MICB_2_MBHC, 1 << 7, 0);
+
 	/* delay 1ms for discharge mic voltage */
 	usleep_range(1000, 1000 + 1000);
 	*sta_z = sitar_codec_sta_dce(codec, 0, false);

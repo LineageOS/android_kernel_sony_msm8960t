@@ -1,4 +1,5 @@
 /* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -130,8 +131,8 @@ struct msm_hdmi_mode_timing_info
 	hdmi_mhl_supported_video_mode_lut[HDMI_VFRMT_MAX] = {
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_UNKNOWN),
 	HDMI_VFRMT_640x480p60_4_3_TIMING,
-	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_720x480p60_4_3),
-	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_720x480p60_16_9),
+	HDMI_VFRMT_720x480p60_4_3_TIMING,
+	HDMI_VFRMT_720x480p60_16_9_TIMING,
 	HDMI_VFRMT_1280x720p60_16_9_TIMING,
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1920x1080i60_16_9),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x480i60_4_3),
@@ -145,8 +146,8 @@ struct msm_hdmi_mode_timing_info
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x480p60_4_3),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x480p60_16_9),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1920x1080p60_16_9),
-	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_720x576p50_4_3),
-	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_720x576p50_16_9),
+	HDMI_VFRMT_720x576p50_4_3_TIMING,
+	HDMI_VFRMT_720x576p50_16_9_TIMING,
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1280x720p50_16_9),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1920x1080i50_16_9),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x576i50_4_3),
@@ -161,7 +162,7 @@ struct msm_hdmi_mode_timing_info
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x576p50_16_9),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1920x1080p50_16_9),
 	HDMI_VFRMT_1920x1080p24_16_9_TIMING,
-	HDMI_VFRMT_1920x1080p25_16_9_TIMING,
+	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1920x1080p25_16_9),
 	HDMI_VFRMT_1920x1080p30_16_9_TIMING,
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_2880x480p60_4_3),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_2880x480p60_16_9),
@@ -188,7 +189,7 @@ struct msm_hdmi_mode_timing_info
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_720x480p240_16_9),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x480i240_4_3),
 	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1440x480i240_16_9),
-	HDMI_VFRMT_1280x1024p60_5_4_TIMING
+	VFRMT_NOT_SUPPORTED(HDMI_VFRMT_1280x1024p60_5_4)
 };
 EXPORT_SYMBOL(hdmi_mhl_supported_video_mode_lut);
 
@@ -248,10 +249,12 @@ static ssize_t hdmi_common_wta_vendor_name(struct device *dev,
 {
 	uint8 *s = (uint8 *) buf;
 	uint8 *d = external_common_state->spd_vendor_name;
+	ssize_t sz;
 	ssize_t ret = strnlen(buf, PAGE_SIZE);
 	ret = (ret > 8) ? 8 : ret;
 
-	memset(external_common_state->spd_vendor_name, 0, 8);
+	sz = sizeof(external_common_state->spd_vendor_name);
+	memset(external_common_state->spd_vendor_name, 0, sz);
 	while (*s) {
 		if (*s & 0x60 && *s ^ 0x7f) {
 			*d = *s;
@@ -265,6 +268,7 @@ static ssize_t hdmi_common_wta_vendor_name(struct device *dev,
 
 		d++;
 	}
+	external_common_state->spd_vendor_name[sz - 1] = 0;
 
 	DEV_DBG("%s: '%s'\n", __func__,
 			external_common_state->spd_vendor_name);
@@ -289,9 +293,11 @@ static ssize_t hdmi_common_wta_product_description(struct device *dev,
 	uint8 *s = (uint8 *) buf;
 	uint8 *d = external_common_state->spd_product_description;
 	ssize_t ret = strnlen(buf, PAGE_SIZE);
+	ssize_t sz;
 	ret = (ret > 16) ? 16 : ret;
 
-	memset(external_common_state->spd_product_description, 0, 16);
+	sz = sizeof(external_common_state->spd_product_description);
+	memset(external_common_state->spd_product_description, 0, sz);
 	while (*s) {
 		if (*s & 0x60 && *s ^ 0x7f) {
 			*d = *s;
@@ -305,6 +311,7 @@ static ssize_t hdmi_common_wta_product_description(struct device *dev,
 
 		d++;
 	}
+	external_common_state->spd_product_description[sz - 1] = 0;
 
 	DEV_DBG("%s: '%s'\n", __func__,
 			external_common_state->spd_product_description);
@@ -530,8 +537,15 @@ static ssize_t hdmi_msm_wta_cec_frame(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	int i;
-	int retry = ((struct hdmi_msm_cec_msg *) buf)->retransmit;
+	struct hdmi_msm_cec_msg *msg;
+	int retry;
 
+	msg = (struct hdmi_msm_cec_msg *) buf;
+	retry = msg->retransmit;
+	if (msg->frame_size > CEC_MAX_OPERAND_SIZE) {
+		pr_err("%s: cec msg too large\n", __func__);
+		return -EINVAL;
+	}
 	for (i = 0; i < RETRANSMIT_MAX_NUM; i++) {
 		hdmi_msm_cec_msg_send((struct hdmi_msm_cec_msg *) buf);
 		if (hdmi_msm_state->cec_frame_wr_status
@@ -1851,7 +1865,10 @@ static int hdmi_common_read_edid_block(int block, uint8 *edid_buf)
 #ifdef DEBUG
 	const u8 *b = edid_buf;
 #endif
-	int status = external_common_state->read_edid_block(block, edid_buf);
+	int i = 0;
+	int status;
+retry:
+	status = external_common_state->read_edid_block(block, edid_buf);
 	if (status)
 		goto error;
 
@@ -1863,6 +1880,8 @@ static int hdmi_common_read_edid_block(int block, uint8 *edid_buf)
 		check_sum += edid_buf[ndx];
 
 	if (check_sum & 0xFF) {
+		if (i++ < 3)
+			goto retry;
 		DEV_ERR("%s: failed CHECKSUM (read:%x, expected:%x)\n",
 			__func__, (uint8)edid_buf[0x7F], (uint8)check_sum);
 #ifdef DEBUG

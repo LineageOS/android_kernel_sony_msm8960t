@@ -16,7 +16,6 @@
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/module.h>
-#include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/miscdevice.h>
@@ -29,8 +28,9 @@
 #include <linux/debugfs.h>
 #endif
 #include <linux/sched.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
 #endif
 #ifdef CONFIG_ARM
 #include <asm/mach-types.h>
@@ -76,6 +76,7 @@
 #define FLASH_CONTROL_WRITE_FIRMWARE_BLOCK		0x02
 #define FLASH_CONTROL_ERASE_ALL				0x03
 #define FLASH_CONTROL_WRITE_CONFIGURATION_BLOCK		0x06
+#define FLASH_CONTROL_ERASE_CONFIGURATION		0x07
 #define FLASH_CONTROL_ENABLE_FLASH_PROGRAMMING		0x0f
 #define FLASH_CONTROL_PROGRAM_ENABLED			0x80
 #define ANALOG_CONTROL_NO_AUTO_CAL			0x10
@@ -98,13 +99,14 @@ do {								\
 
 #define LOCK(this)			\
 do {					\
-	LOG_VERBOSE(this, "LOCK\n");	\
+	LOG_CHECK(this, "(will lock)\n");	\
 	mutex_lock(&this->lock);	\
+	LOG_CHECK(this, "LOCKED\n");	\
 } while (0)
 #define UNLOCK(this)			\
 do {					\
+	LOG_CHECK(this, "UNLOCK\n");	\
 	mutex_unlock(&this->lock);	\
-	LOG_VERBOSE(this, "UNLOCK\n");	\
 } while (0)
 
 enum synaptics_state {
@@ -233,12 +235,19 @@ enum synaptics_flush_commands {
 	SYN_LOAD_START,
 	SYN_LOAD_END,
 	SYN_FORCE_FLUSH,
+	SYN_CONFIG_FLUSH,
 };
 
 static const char * const flush_commands[] = {
 	[SYN_LOAD_START]	= "load_start",
 	[SYN_LOAD_END]		= "load_end",
 	[SYN_FORCE_FLUSH]	= "force_flush",
+	[SYN_CONFIG_FLUSH]	= "config_flush",
+};
+
+enum synaptics_flash_modes {
+	SYN_FLASH_MODE_NORMAL = 0,
+	SYN_FLASH_MODE_CONFIG = 1,
 };
 
 struct synaptics_device_info {
@@ -326,7 +335,6 @@ struct synaptics_clearpad {
 	struct clearpad_platform_data *pdata;
 	struct clearpad_bus_data *bdata;
 	struct mutex lock;
-	struct work_struct work;
 	struct synaptics_device_info device_info;
 	struct synaptics_funcarea *funcarea;
 	struct synaptics_pointer pointer[SYNAPTICS_MAX_N_FINGERS];
@@ -336,11 +344,15 @@ struct synaptics_clearpad {
 	struct platform_device *rmi_dev;
 #endif
 	bool fwdata_available;
+	enum synaptics_flash_modes flash_mode;
 	struct synaptics_extents extents;
 	int active;
 	int irq_mask;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notif;
+	bool pm_suspended;
+	struct work_struct notify_resume;
+	struct work_struct notify_suspend;
 #endif
 	char fwname[SYNAPTICS_STRING_LENGTH + 1];
 	char result_info[SYNAPTICS_STRING_LENGTH + 1];
@@ -352,9 +364,13 @@ struct synaptics_clearpad {
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
+	spinlock_t slock;
+	bool dev_busy;
+	bool irq_pending;
 };
 
 static void synaptics_funcarea_initialize(struct synaptics_clearpad *this);
+static void synaptics_clearpad_reset_power(struct synaptics_clearpad *this);
 
 static char *make_string(u8 *array, size_t size)
 {
@@ -437,7 +453,7 @@ static void synaptics_clearpad_set_irq(struct synaptics_clearpad *this,
 		enable_irq(this->pdata->irq);
 	} else if (!mask && this->irq_mask) {
 		LOG_STAT(this, "disable IRQ (user_mask 0x%02x)\n", mask);
-		disable_irq(this->pdata->irq);
+		disable_irq_nosync(this->pdata->irq);
 	} else
 		LOG_STAT(this, "no change IRQ (%s)\n",
 				mask ? "enable" : "disable");
@@ -660,6 +676,9 @@ static int synaptics_flash_enable(struct synaptics_clearpad *this)
 	int rc;
 	u8 buf[2];
 
+	if (!this->fwdata_available)
+		return -EINVAL;
+
 	/* read bootloader id */
 	rc = synaptics_read(this, SYNF(F34_FLASH, QUERY, 0x00),
 			buf, sizeof(buf));
@@ -686,10 +705,8 @@ static int synaptics_flash_enable(struct synaptics_clearpad *this)
 	this->state = SYN_STATE_FLASH_ENABLE;
 	msleep(100);
 
-	LOCK(this);
 	synaptics_clearpad_set_irq(this,
 			this->pdt[SYN_F34_FLASH].irq_mask, true);
-	UNLOCK(this);
 
 	return rc;
 }
@@ -698,6 +715,9 @@ static int synaptics_flash_program(struct synaptics_clearpad *this)
 {
 	int rc;
 	u8 buf[2];
+
+	if (!this->fwdata_available)
+		return -EINVAL;
 
 	/* make sure that we are in programming mode and there are no issues */
 	rc = synaptics_read(this, SYNF(F34_FLASH, DATA, 0x12), buf, 1);
@@ -729,14 +749,19 @@ static int synaptics_flash_program(struct synaptics_clearpad *this)
 
 	usleep(10000);
 
-	/* issue a firmware and configuration erase */
-	rc = synaptics_put(this, SYNF(F34_FLASH, DATA, 0x12),
-					FLASH_CONTROL_ERASE_ALL);
+	if (this->flash_mode == SYN_FLASH_MODE_NORMAL)
+		/* issue a firmware and configuration erase */
+		rc = synaptics_put(this, SYNF(F34_FLASH, DATA, 0x12),
+				   FLASH_CONTROL_ERASE_ALL);
+	else
+		/* issue a configuration erase */
+		rc = synaptics_put(this, SYNF(F34_FLASH, DATA, 0x12),
+				   FLASH_CONTROL_ERASE_CONFIGURATION);
+
 	if (rc)
 		return rc;
 
 	dev_info(&this->pdev->dev, "firmware erasing\n");
-	dev_info(&this->pdev->dev, "flashing data\n");
 
 	this->state = SYN_STATE_FLASH_PROGRAM;
 	return rc;
@@ -749,6 +774,12 @@ static int synaptics_flash_data(struct synaptics_clearpad *this)
 	u8 buf;
 	const u8 *data;
 	struct synaptics_flash_image *f = &this->flash;
+
+	if (!this->fwdata_available)
+		return -EINVAL;
+
+	if (f->data.pos > 0)
+		goto write_block_data;
 
 	/* make sure that we are in programming mode and there are no issues */
 	rc = synaptics_read(this, SYNF(F34_FLASH, DATA, 0x12), &buf, 1);
@@ -773,6 +804,7 @@ static int synaptics_flash_data(struct synaptics_clearpad *this)
 	if (rc)
 		return rc;
 
+write_block_data:
 	data = f->data.data + f->data.pos * 16;
 	len = f->data.length - f->data.pos * 16;
 	if (len > 16)
@@ -782,8 +814,6 @@ static int synaptics_flash_data(struct synaptics_clearpad *this)
 	rc = synaptics_write(this, SYNF(F34_FLASH, DATA, 0x02), data, len);
 	if (rc)
 		return rc;
-
-	usleep(10000);
 
 	/* issue a write data block command */
 	rc = synaptics_put(this, SYNF(F34_FLASH, DATA, 0x12),
@@ -812,6 +842,12 @@ static int synaptics_flash_config(struct synaptics_clearpad *this)
 	const u8 *data;
 	struct synaptics_flash_image *f = &this->flash;
 
+	if (!this->fwdata_available)
+		return -EINVAL;
+
+	if (f->config.pos > 0)
+		goto write_block_data;
+
 	/* make sure that we are in programming mode and there are no issues */
 	rc = synaptics_read(this, SYNF(F34_FLASH, DATA, 0x12), &buf, 1);
 	if (rc)
@@ -835,6 +871,7 @@ static int synaptics_flash_config(struct synaptics_clearpad *this)
 	if (rc)
 		return rc;
 
+write_block_data:
 	data = f->config.data + f->config.pos * 16;
 	len = f->config.length - f->config.pos * 16;
 	if (len > 16)
@@ -844,8 +881,6 @@ static int synaptics_flash_config(struct synaptics_clearpad *this)
 	rc = synaptics_write(this, SYNF(F34_FLASH, DATA, 0x02), data, len);
 	if (rc)
 		return rc;
-
-	usleep(10000);
 
 	/* issue a write configuration block command */
 	rc = synaptics_put(this, SYNF(F34_FLASH, DATA, 0x12),
@@ -868,6 +903,9 @@ static int synaptics_flash_disable(struct synaptics_clearpad *this)
 {
 	int rc;
 	u8 buf;
+
+	if (!this->fwdata_available)
+		return -EINVAL;
 
 	/* make sure that we are in programming mode and there are no issues */
 	rc = synaptics_read(this, SYNF(F34_FLASH, DATA, 0x12), &buf, 1);
@@ -968,10 +1006,17 @@ static int synaptics_clearpad_flash(struct synaptics_clearpad *this)
 		LOG_CHECK(this, "rc=%d\n", rc);
 		break;
 	case SYN_STATE_FLASH_PROGRAM:
-		rc = synaptics_flash_data(this);
+		if (this->flash_mode == SYN_FLASH_MODE_NORMAL) {
+			rc = synaptics_flash_data(this);
+			LOG_CHECK(this, "rc=%d\n", rc);
+		} else {
+			rc = synaptics_flash_config(this);
+			LOG_CHECK(this, "rc=%d\n", rc);
+		}
 		break;
 	case SYN_STATE_FLASH_DATA:
 		rc = synaptics_flash_config(this);
+		LOG_CHECK(this, "rc=%d\n", rc);
 		break;
 	case SYN_STATE_FLASH_CONFIG:
 		rc = synaptics_flash_disable(this);
@@ -989,7 +1034,7 @@ static int synaptics_clearpad_flash(struct synaptics_clearpad *this)
 
 	if (rc) {
 		dev_err(&this->pdev->dev,
-				"failed during flash\n");
+			"failed during flash (%s)\n", state_name[this->state]);
 		this->state = SYN_STATE_DISABLED;
 		synaptics_clearpad_set_irq(this,
 				this->pdt[SYN_F34_FLASH].irq_mask, false);
@@ -1081,11 +1126,8 @@ static int synaptics_clearpad_set_power(struct synaptics_clearpad *this)
 		 users,
 		 !!(active & SYN_STANDBY));
 
-	if (this->state == SYN_STATE_DISABLED) {
-		dev_err(&this->pdev->dev, "state == SYN_STATE_DISABLED\n");
-		rc = -ENODEV;
-		goto err_unlock;
-	}
+	dev_info(&this->pdev->dev, "%s: state=%s\n", __func__,
+		 state_name[this->state]);
 	should_wake = !(active & SYN_STANDBY);
 
 	if (should_wake && !(active & SYN_ACTIVE_POWER)) {
@@ -1100,7 +1142,13 @@ static int synaptics_clearpad_set_power(struct synaptics_clearpad *this)
 
 		synaptics_clearpad_set_irq(this,
 				this->pdt[SYN_F01_RMI].irq_mask, true);
-		synaptics_read(this, SYNF(F01_RMI, DATA, 0x01), &irq, 1);
+		rc = synaptics_read(this, SYNF(F01_RMI, DATA, 0x01), &irq, 1);
+		if (rc) {
+			dev_err(&this->pdev->dev,
+					"%s, rc = %d, Resetting device\n",
+					__func__, rc);
+			synaptics_clearpad_reset_power(this);
+		}
 
 		rc = synaptics_put_bit(this, SYNF(F01_RMI, CTRL, 0x00),
 			DEVICE_CONTROL_SLEEP_MODE_NORMAL_OPERATION,
@@ -1149,14 +1197,23 @@ err_unlock:
 static void synaptics_clearpad_reset_power(struct synaptics_clearpad *this)
 {
 	int rc;
+	unsigned long flags;
+
+	spin_lock_irqsave(&this->slock, flags);
+	this->dev_busy = false;
+	this->irq_pending = false;
+	spin_unlock_irqrestore(&this->slock, flags);
 
 	if (this->pdata->vreg_reset) {
 		rc = this->pdata->vreg_reset();
 		dev_info(&this->pdev->dev, "power on reset\n");
 		if (rc)
 			dev_err(&this->pdev->dev, "vreg reset failed\n");
+		else {
+			this->page_num = 0;
+			msleep(300);
+		}
 	}
-	this->page_num = 0;
 }
 
 static void synaptics_funcarea_initialize(struct synaptics_clearpad *this)
@@ -1274,9 +1331,6 @@ static void synaptics_funcarea_crop(struct synaptics_area *area,
 		point->y = area->y2;
 
 }
-
-static void synaptics_funcarea_up(struct synaptics_clearpad *,
-				  struct synaptics_pointer *);
 
 static void synaptics_funcarea_down(struct synaptics_clearpad *this,
 				    struct synaptics_pointer *pointer)
@@ -1408,6 +1462,24 @@ synaptics_funcarea_report_extra_events(struct synaptics_clearpad *this)
 	}
 }
 
+static void synaptics_funcarea_invalidate_all(struct synaptics_clearpad *this)
+{
+	struct synaptics_pointer *pointer;
+	int i;
+
+	for (i = 0; i < this->extents.n_fingers; ++i) {
+		pointer = &this->pointer[i];
+		if (pointer->down) {
+			pointer->down = false;
+			LOG_VERBOSE(this, "invalidate pointer %d\n", i);
+		}
+		if (pointer->funcarea)
+			synaptics_funcarea_up(this, pointer);
+	}
+	synaptics_funcarea_report_extra_events(this);
+	input_sync(this->input);
+}
+
 static void synaptics_report_finger_n(struct synaptics_clearpad *this,
 				      int finger)
 {
@@ -1493,14 +1565,11 @@ static int synaptics_clearpad_read_fingers(struct synaptics_clearpad *this)
 	return rc;
 }
 
-static void synaptics_clearpad_worker(struct work_struct *work)
+static void synaptics_clearpad_process_irq(struct synaptics_clearpad *this)
 {
-	struct synaptics_clearpad *this;
 	int rc, i;
 	u8 status;
 	u8 interrupt;
-
-	this = container_of(work, struct synaptics_clearpad, work);
 
 	LOCK(this);
 	rc = synaptics_clearpad_page_sel(this, 0x00);
@@ -1528,7 +1597,7 @@ static void synaptics_clearpad_worker(struct work_struct *work)
 								== status) {
 				dev_info(&this->pdev->dev, "device reset\n");
 				if (this->state == SYN_STATE_FLASH_DISABLE) {
-					synaptics_flash_verify(this);
+					synaptics_clearpad_flash(this);
 				} else {
 					synaptics_clearpad_initialize(this);
 					this->state = SYN_STATE_RUNNING;
@@ -1608,17 +1677,28 @@ err_bus:
 	dev_err(&this->pdev->dev, "read error\n");
 unlock:
 	UNLOCK(this);
-	return;
 }
 
-static irqreturn_t synaptics_clearpad_irq(int irq, void *dev_id)
+static irqreturn_t synaptics_clearpad_threaded_handler(int irq, void *dev_id)
 {
 	struct device *dev = dev_id;
 	struct synaptics_clearpad *this = dev_get_drvdata(dev);
+	unsigned long flags;
 
-	if (this)
-		schedule_work(&this->work);
+	do {
+		synaptics_clearpad_process_irq(this);
 
+		spin_lock_irqsave(&this->slock, flags);
+		if (likely(!this->irq_pending)) {
+			this->dev_busy = false;
+			spin_unlock_irqrestore(&this->slock, flags);
+			break;
+		}
+		this->irq_pending = false;
+		dev_info(&this->pdev->dev, "Touch irq pending\n");
+		spin_unlock_irqrestore(&this->slock, flags);
+
+	} while (true);
 	return IRQ_HANDLED;
 }
 
@@ -1755,6 +1835,8 @@ static int synaptics_clearpad_command_fw_load_start(
 					struct synaptics_clearpad *this)
 {
 	int rc;
+
+	LOCK(this);
 	if (this->flash.image == NULL) {
 		synaptics_firmware_reset(this);
 		rc = sysfs_create_bin_file(&this->input->dev.kobj,
@@ -1765,24 +1847,30 @@ static int synaptics_clearpad_command_fw_load_start(
 		}
 	} else {
 		dev_err(&this->pdev->dev,
-				"flash.image allready exists\n");
+				"flash.image already exists\n");
 		synaptics_firmware_reset(this);
 		rc = -EINVAL;
 	}
+	UNLOCK(this);
+
 	return rc;
 }
 
-static int synaptics_clearpad_command_fw_flash(struct synaptics_clearpad *this)
+static int synaptics_clearpad_command_fw_flash(struct synaptics_clearpad *this,
+					enum synaptics_flash_modes flash_mode)
 {
 	enum   synaptics_state state;
 	int rc;
 
+	LOCK(this);
 	if (!this->fwdata_available) {
 		dev_err(&this->pdev->dev,
 				"fwdata_available is not ready yet\n");
 		rc = -EINVAL;
+		UNLOCK(this);
 		goto error;
 	}
+	UNLOCK(this);
 	if (wait_event_interruptible(this->task_none_wq,
 			synaptics_clearpad_check_task(this, &state))) {
 		rc = -ERESTARTSYS;
@@ -1791,6 +1879,7 @@ static int synaptics_clearpad_command_fw_flash(struct synaptics_clearpad *this)
 
 	memset(this->result_info, 0, SYNAPTICS_STRING_LENGTH);
 	this->flash_requested = true;
+	this->flash_mode = flash_mode;
 
 	synaptics_firmware_check(this);
 
@@ -1809,7 +1898,10 @@ static int synaptics_clearpad_command_fw_flash(struct synaptics_clearpad *this)
 	if (rc)
 		goto error;
 
+	LOCK(this);
 	rc = synaptics_clearpad_initialize(this);
+	LOG_CHECK(this, "rc=%d\n", rc);
+	UNLOCK(this);
 	if (rc)
 		goto error;
 
@@ -1856,6 +1948,7 @@ static int synaptics_clearpad_command_fw_load_end(
 {
 	int rc;
 
+	LOCK(this);
 	if (!this->flash.image) {
 		dev_err(&this->pdev->dev,
 				"loading firmware is not started yet\n");
@@ -1871,6 +1964,8 @@ static int synaptics_clearpad_command_fw_load_end(
 	}
 	sysfs_remove_bin_file(&this->input->dev.kobj,
 			&synaptics_clearpad_fwdata);
+	UNLOCK(this);
+
 	return rc;
 }
 
@@ -1919,7 +2014,13 @@ static ssize_t synaptics_clearpad_fwflush_store(struct device *dev,
 	} else if (!strncmp(buf, flush_commands[SYN_LOAD_END], PAGE_SIZE)) {
 		rc = synaptics_clearpad_command_fw_load_end(this);
 	} else if (!strncmp(buf, flush_commands[SYN_FORCE_FLUSH], PAGE_SIZE)) {
-		rc = synaptics_clearpad_command_fw_flash(this);
+		dev_info(&this->pdev->dev, "start firmware flash\n");
+		rc = synaptics_clearpad_command_fw_flash(this,
+							 SYN_FLASH_MODE_NORMAL);
+	} else if (!strncmp(buf, flush_commands[SYN_CONFIG_FLUSH], PAGE_SIZE)) {
+		dev_info(&this->pdev->dev, "start firmware config\n");
+		rc = synaptics_clearpad_command_fw_flash(this,
+							 SYN_FLASH_MODE_CONFIG);
 	} else {
 		dev_err(&this->pdev->dev, "illegal command\n");
 		rc = -EINVAL;
@@ -1994,10 +2095,11 @@ static ssize_t synaptics_clearpad_enabled_store(struct device *dev,
 	goto end;
 
 enable:
-	rc = request_irq(this->pdata->irq, &synaptics_clearpad_irq,
-		IRQF_TRIGGER_FALLING,
-		this->pdev->dev.driver->name,
-		&this->pdev->dev);
+	rc = request_threaded_irq(this->pdata->irq, NULL,
+				  &synaptics_clearpad_threaded_handler,
+				  IRQF_TRIGGER_FALLING,
+				  this->pdev->dev.driver->name,
+				  &this->pdev->dev);
 	if (rc) {
 		dev_err(&this->pdev->dev,
 			"irq %d busy? <%d>\n",
@@ -2078,7 +2180,7 @@ static int synaptics_clearpad_input_init(struct synaptics_clearpad *this)
 	return rc;
 }
 
-static int synaptics_clearpad_pm_suspend(struct device *dev)
+static int synaptics_clearpad_suspend(struct device *dev)
 {
 	struct synaptics_clearpad *this = dev_get_drvdata(dev);
 	int rc = 0;
@@ -2093,13 +2195,16 @@ static int synaptics_clearpad_pm_suspend(struct device *dev)
 
 	LOG_STAT(this, "active: %x (task: %s)\n",
 		 this->active, task_name[this->task]);
+#ifdef CONFIG_FB
+	this->pm_suspended = true;
+#endif
 	UNLOCK(this);
 
 	rc = synaptics_clearpad_set_power(this);
 	return rc;
 }
 
-static int synaptics_clearpad_pm_resume(struct device *dev)
+static int synaptics_clearpad_resume(struct device *dev)
 {
 	struct synaptics_clearpad *this = dev_get_drvdata(dev);
 	int rc = 0;
@@ -2112,31 +2217,133 @@ static int synaptics_clearpad_pm_resume(struct device *dev)
 
 	LOG_STAT(this, "active: %x (task: %s)\n",
 		 this->active, task_name[this->task]);
+
+	synaptics_funcarea_invalidate_all(this);
+#ifdef CONFIG_FB
+	this->pm_suspended = false;
+#endif
 	UNLOCK(this);
 
 	rc = synaptics_clearpad_set_power(this);
 	return rc;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void synaptics_clearpad_early_suspend(struct early_suspend *handler)
+static int synaptics_clearpad_pm_suspend(struct device *dev)
 {
-	struct synaptics_clearpad *this =
-	container_of(handler, struct synaptics_clearpad, early_suspend);
+	struct synaptics_clearpad *this = dev_get_drvdata(dev);
+	unsigned long flags;
+	int rc = 0;
 
-	dev_info(&this->pdev->dev, "early suspend\n");
-	synaptics_clearpad_pm_suspend(&this->pdev->dev);
+	spin_lock_irqsave(&this->slock, flags);
+	if (unlikely(this->dev_busy)) {
+		dev_info(dev, "Busy to suspend\n");
+		spin_unlock_irqrestore(&this->slock, flags);
+		return -EBUSY;
+	}
+	this->dev_busy = true;
+	spin_unlock_irqrestore(&this->slock, flags);
+
+#ifdef CONFIG_FB
+	if (!this->pm_suspended)
+#endif
+		rc = synaptics_clearpad_suspend(&this->pdev->dev);
+	if (rc)
+		return rc;
+
+	if (device_may_wakeup(dev)) {
+		enable_irq_wake(this->pdata->irq);
+		dev_info(&this->pdev->dev, "enable irq wake");
+	}
+	return 0;
 }
 
-static void synaptics_clearpad_late_resume(struct early_suspend *handler)
+static int synaptics_clearpad_pm_resume(struct device *dev)
 {
-	struct synaptics_clearpad *this =
-	container_of(handler, struct synaptics_clearpad, early_suspend);
+	struct synaptics_clearpad *this = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool irq_pending;
+	int rc = 0;
 
-	dev_info(&this->pdev->dev, "late resume\n");
-	synaptics_clearpad_pm_resume(&this->pdev->dev);
+	if (device_may_wakeup(dev)) {
+		disable_irq_wake(this->pdata->irq);
+		dev_info(&this->pdev->dev, "disable irq wake");
+	}
+
+	spin_lock_irqsave(&this->slock, flags);
+	irq_pending = this->irq_pending;
+	this->irq_pending = false;
+	this->dev_busy = false;
+	spin_unlock_irqrestore(&this->slock, flags);
+
+	if (unlikely(irq_pending)) {
+		dev_dbg(&this->pdev->dev, "Process pending IRQ\n");
+		synaptics_clearpad_process_irq(this);
+	}
+
+#ifdef CONFIG_FB
+	if (irq_pending)
+#endif
+		rc = synaptics_clearpad_resume(&this->pdev->dev);
+	return rc;
+}
+
+static int synaptics_clearpad_pm_suspend_noirq(struct device *dev)
+{
+	struct synaptics_clearpad *this = dev_get_drvdata(dev);
+	if (this->irq_pending && device_may_wakeup(dev)) {
+		dev_info(&this->pdev->dev, "Need to resume\n");
+		return -EBUSY;
+	}
+	return 0;
+}
+
+#ifdef CONFIG_FB
+static void synaptics_notify_resume(struct work_struct *work)
+{
+	struct synaptics_clearpad *this = container_of(work,
+			struct synaptics_clearpad, notify_resume);
+
+	if (this->pm_suspended)
+		synaptics_clearpad_resume(&this->pdev->dev);
+}
+
+static void synaptics_notify_suspend(struct work_struct *work)
+{
+	struct synaptics_clearpad *this = container_of(work,
+			struct synaptics_clearpad, notify_suspend);
+
+	if (!this->pm_suspended)
+		synaptics_clearpad_suspend(&this->pdev->dev);
+}
+
+static int synaptics_fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int *blank;
+	struct synaptics_clearpad *this =
+		container_of(self, struct synaptics_clearpad, fb_notif);
+
+	if (evdata && evdata->data && event == FB_EVENT_BLANK && this &&
+			this->pdev) {
+		blank = evdata->data;
+		if (*blank == FB_BLANK_UNBLANK) {
+			dev_dbg(&this->pdev->dev, "FB UNBLANK\n");
+			cancel_work_sync(&this->notify_suspend);
+			cancel_work_sync(&this->notify_resume);
+			schedule_work(&this->notify_resume);
+		} else if (*blank == FB_BLANK_POWERDOWN) {
+			dev_dbg(&this->pdev->dev, "FB POWERDOWN\n");
+			cancel_work_sync(&this->notify_resume);
+			cancel_work_sync(&this->notify_suspend);
+			schedule_work(&this->notify_suspend);
+		}
+	}
+
+	return 0;
 }
 #endif
+
 #ifdef CONFIG_DEBUG_FS
 static void synaptics_clearpad_analog_test(struct synaptics_clearpad *this,
 		u8 f_analog, u8 mode, u8 count)
@@ -2146,6 +2353,8 @@ static void synaptics_clearpad_analog_test(struct synaptics_clearpad *this,
 	enum synaptics_state state;
 	const char str1[] = " | ";
 	const char str2[] = "\n";
+
+	memset(buf, 0, sizeof(buf));
 
 	LOCK(this);
 	this->task = SYN_TASK_NO_SUSPEND;
@@ -2467,7 +2676,6 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	mutex_init(&this->lock);
-	INIT_WORK(&this->work, synaptics_clearpad_worker);
 	init_waitqueue_head(&this->task_none_wq);
 
 	dev_set_drvdata(&pdev->dev, this);
@@ -2528,7 +2736,10 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 
 	msleep(400);
 
+	LOCK(this);
 	rc = synaptics_clearpad_initialize(this);
+	LOG_CHECK(this, "rc=%d\n", rc);
+	UNLOCK(this);
 	if (rc)
 		goto err_gpio_teardown;
 
@@ -2538,36 +2749,39 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 
 	this->state = SYN_STATE_RUNNING;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	this->early_suspend.suspend = synaptics_clearpad_early_suspend;
-	this->early_suspend.resume = synaptics_clearpad_late_resume;
-	register_early_suspend(&this->early_suspend);
+#ifdef CONFIG_FB
+	this->fb_notif.notifier_call = synaptics_fb_notifier_callback;
+	rc = fb_register_client(&this->fb_notif);
+	if (rc) {
+		dev_err(&this->pdev->dev, "Unable to register fb_notifier\n");
+	} else {
+		INIT_WORK(&this->notify_resume, synaptics_notify_resume);
+		INIT_WORK(&this->notify_suspend, synaptics_notify_suspend);
+	}
 #endif
 
 	/* sysfs */
 	rc = sysfs_create_group(&this->input->dev.kobj,
 				&synaptics_clearpad_attrs);
 	if (rc)
-		goto err_unregister_early_suspend;
+		goto err_unregister_fb;
 
 #ifdef CONFIG_DEBUG_FS
 	/* debugfs */
 	synaptics_clearpad_debug_init(this);
 #endif
 
-	LOCK(this);
-	rc = request_irq(this->pdata->irq, &synaptics_clearpad_irq,
-			IRQF_TRIGGER_FALLING,
-			this->pdev->dev.driver->name,
-			&this->pdev->dev);
+	rc = request_threaded_irq(this->pdata->irq, NULL,
+				  &synaptics_clearpad_threaded_handler,
+				  IRQF_TRIGGER_FALLING,
+				  this->pdev->dev.driver->name,
+				  &this->pdev->dev);
 	if (rc) {
 		dev_err(&this->pdev->dev,
 		       "irq %d busy?\n", this->pdata->irq);
-		UNLOCK(this);
 		goto err_sysfs_remove_group;
 	}
-	disable_irq(this->pdata->irq);
-	UNLOCK(this);
+	disable_irq_nosync(this->pdata->irq);
 
 	rc = synaptics_clearpad_set_power(this);
 	if (rc)
@@ -2582,9 +2796,9 @@ err_sysfs_remove_group:
 	debugfs_remove_recursive(this->debugfs);
 #endif
 	sysfs_remove_group(&this->input->dev.kobj, &synaptics_clearpad_attrs);
-err_unregister_early_suspend:
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&this->early_suspend);
+err_unregister_fb:
+#ifdef CONFIG_FB
+	fb_unregister_client(&this->fb_notif);
 #endif
 	input_unregister_device(this->input);
 err_gpio_teardown:
@@ -2612,8 +2826,10 @@ static int __devexit clearpad_remove(struct platform_device *pdev)
 	debugfs_remove_recursive(this->debugfs);
 #endif
 	sysfs_remove_group(&this->input->dev.kobj, &synaptics_clearpad_attrs);
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&this->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&this->fb_notif);
+	cancel_work_sync(&this->notify_resume);
+	cancel_work_sync(&this->notify_suspend);
 #endif
 	input_unregister_device(this->input);
 	if (this->pdata->gpio_configure)
@@ -2629,12 +2845,10 @@ static int __devexit clearpad_remove(struct platform_device *pdev)
 	return 0;
 }
 
-
 static const struct dev_pm_ops synaptics_clearpad_pm = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend = synaptics_clearpad_pm_suspend,
 	.resume = synaptics_clearpad_pm_resume,
-#endif
+	.suspend_noirq = synaptics_clearpad_pm_suspend_noirq,
 };
 
 static struct platform_driver clearpad_driver = {
