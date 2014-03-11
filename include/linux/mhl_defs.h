@@ -1,4 +1,7 @@
-/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
+/*
+ * Copyright (C) 2011 Sony Ericsson Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
+ * Copyright (C) 2011 Silicon Image Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,12 +46,14 @@ enum DevCapOffset_e {
 
 /* Version that this chip supports */
 #define MHL_VER_MAJOR			(0x01 << 4)	/* bits 4..7 */
-#define MHL_VER_MINOR			0x02		/* bits 0..3 */
+#define MHL_VER_MINOR			0x03		/* bits 0..3 */
 #define MHL_VERSION			(MHL_VER_MAJOR | MHL_VER_MINOR)
 
 /* Device Category */
 #define MHL_DEV_CATEGORY_OFFSET		DEVCAP_OFFSET_DEV_CAT
 #define MHL_DEV_CATEGORY_POW_BIT	BIT(4)
+#define MHL_DEV_CATEGORY_PLIM0_BIT	BIT(5)
+#define MHL_DEV_CATEGORY_PLIM1_BIT	BIT(6)
 
 #define	MHL_DEV_CAT_SINK			0x01
 #define	MHL_DEV_CAT_SOURCE			0x02
@@ -150,7 +155,7 @@ enum {
 };
 
 #define MHL_RCPE_NO_ERROR			0x00
-#define MHL_RCPE_UNSUPPORTED_KEY_CODE		0x01
+#define MHL_RCPE_INEFFECTIVE_KEY_CODE		0x01
 #define MHL_RCPE_BUSY				0x02
 
 #define MHL_RAPK_NO_ERROR			0x00

@@ -10,7 +10,7 @@
 
 #include "../msm_fb.h"
 #include "../mipi_dsi.h"
-#include "../mipi_dsi_panel_driver.h"
+#include "../mipi_dsi_panel.h"
 
 /* Display ON Sequence */
 static char exit_sleep[] = {
@@ -57,30 +57,6 @@ static struct dsi_cmd_desc display_off_cmd_seq[] = {
 
 static struct dsi_cmd_desc read_ddb_cmd_seq[] = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(read_ddb_start), read_ddb_start},
-};
-
-static const struct panel_cmd display_init_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_init_cmd_seq,
-				ARRAY_SIZE(display_init_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd display_on_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_on_cmd_seq,
-				ARRAY_SIZE(display_on_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd display_off_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_off_cmd_seq,
-				ARRAY_SIZE(display_off_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd read_ddb_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {read_ddb_cmd_seq,
-				ARRAY_SIZE(read_ddb_cmd_seq)} } },
-	{CMD_END, {} },
 };
 
 static const struct mipi_dsi_phy_ctrl dsi_video_mode_phy_db[] = {
@@ -162,11 +138,14 @@ static struct msm_panel_info *get_panel_info(void)
 }
 
 static struct dsi_controller dsi_video_controller_panel = {
-	.get_panel_info	= get_panel_info,
-	.display_init	= display_init_cmds,
-	.display_on	= display_on_cmds,
-	.display_off	= display_off_cmds,
-	.read_id	= read_ddb_cmds,
+	.get_panel_info = get_panel_info,
+	.display_init_cmds = display_init_cmd_seq,
+	.display_on_cmds = display_on_cmd_seq,
+	.display_off_cmds = display_off_cmd_seq,
+	.read_id_cmds = read_ddb_cmd_seq,
+	.display_init_cmds_size = ARRAY_SIZE(display_init_cmd_seq),
+	.display_on_cmds_size = ARRAY_SIZE(display_on_cmd_seq),
+	.display_off_cmds_size = ARRAY_SIZE(display_off_cmd_seq),
 };
 
 static char ddb_val_1a[] = {
@@ -181,38 +160,32 @@ static char default_ddb_val[] = {
 	0x00, 0x00
 };
 
-const struct panel auo_h455tvn01_panel_id_1a = {
+const struct panel_id auo_h455tvn01_panel_id_1a = {
 	.name = "mipi_video_auo_wxga_h455tvn01_id_1a",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val_1a,
 	.id_num = ARRAY_SIZE(ddb_val_1a),
 	.width = 53,
 	.height = 95,
-	.panel_id = "h455tvn01",
-	.panel_rev = "1a",
 	.esd_failed_check = true,
 };
 
-const struct panel auo_h455tvn01_panel_id = {
+const struct panel_id auo_h455tvn01_panel_id = {
 	.name = "mipi_video_auo_wxga_h455tvn01",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val,
 	.id_num = ARRAY_SIZE(ddb_val),
 	.width = 53,
 	.height = 95,
-	.panel_id = "h455tvn01",
-	.panel_rev = "generic",
 	.esd_failed_check = true,
 };
 
-const struct panel auo_h455tvn01_panel_default = {
+const struct panel_id auo_h455tvn01_panel_default = {
 	.name = "mipi_auo_panel",
 	.pctrl = &dsi_video_controller_panel,
 	.id = default_ddb_val,
 	.id_num = ARRAY_SIZE(default_ddb_val),
 	.width = 53,
 	.height = 95,
-	.panel_id = "h455tvn01",
-	.panel_rev = "default",
 	.esd_failed_check = true,
 };

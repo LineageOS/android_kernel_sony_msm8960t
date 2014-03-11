@@ -429,6 +429,16 @@ struct mddi_platform_data {
 	int (*mddi_client_power)(u32 client_id);
 };
 
+struct panel_id;
+
+struct lcd_panel_platform_data {
+	const struct panel_id **default_panels;
+	const struct panel_id **panels;
+	int (*lcd_power)(int on);
+	int (*lcd_reset)(int ms);
+	int (*gpio_setup)(int request);
+};
+
 struct mipi_dsi_platform_data {
 	int vsync_gpio;
 	int (*dsi_power_save)(int on);

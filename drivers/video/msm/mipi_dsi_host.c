@@ -1,5 +1,6 @@
 
 /* Copyright (c) 2008-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -182,7 +183,7 @@ void mipi_dsi_clk_cfg(int on)
 	mutex_lock(&clk_mutex);
 	if (on) {
 		if (dsi_clk_cnt == 0) {
-			mipi_dsi_prepare_clocks();
+			mipi_dsi_prepare_ahb_clocks();
 			mipi_dsi_ahb_ctrl(1);
 			mipi_dsi_clk_enable();
 		}
@@ -192,8 +193,9 @@ void mipi_dsi_clk_cfg(int on)
 			dsi_clk_cnt--;
 			if (dsi_clk_cnt == 0) {
 				mipi_dsi_clk_disable();
-				mipi_dsi_ahb_ctrl(0);
 				mipi_dsi_unprepare_clocks();
+				mipi_dsi_ahb_ctrl(0);
+				mipi_dsi_unprepare_ahb_clocks();
 			}
 		}
 	}
@@ -204,6 +206,7 @@ void mipi_dsi_clk_cfg(int on)
 
 void mipi_dsi_turn_on_clks(void)
 {
+	mipi_dsi_prepare_ahb_clocks();
 	mipi_dsi_ahb_ctrl(1);
 	mipi_dsi_clk_enable();
 }
@@ -211,7 +214,9 @@ void mipi_dsi_turn_on_clks(void)
 void mipi_dsi_turn_off_clks(void)
 {
 	mipi_dsi_clk_disable();
+	mipi_dsi_unprepare_clocks();
 	mipi_dsi_ahb_ctrl(0);
+	mipi_dsi_unprepare_ahb_clocks();
 }
 
 static void mipi_dsi_action(struct list_head *act_list)
@@ -337,6 +342,16 @@ int mipi_dsi_buf_alloc(struct dsi_buf *dp, int size)
 	dp->data = dp->start;
 	dp->len = 0;
 	return size;
+}
+
+void mipi_dsi_buf_release(struct dsi_buf *dp)
+{
+	kfree(dp->start);
+	dp->start = NULL;
+	dp->end = NULL;
+	dp->data = NULL;
+	dp->size = 0;
+	dp->len = 0;
 }
 
 /*
@@ -1300,6 +1315,8 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 		/* make sure mdp dma is not txing pixel data */
 #ifdef CONFIG_FB_MSM_MDP303
 			mdp3_dsi_cmd_dma_busy_wait(mfd);
+#else
+			mipi_dsi_mdp_busy_wait();
 #endif
 	}
 
@@ -1335,7 +1352,6 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 	}
 
 	mipi_dsi_cmd_dma_rx(rp, cnt);
-
 	diff = rp->len - cnt;
 	rp->data += diff;
 
@@ -1861,14 +1877,4 @@ irqreturn_t mipi_dsi_isr(int irq, void *ptr)
 
 
 	return IRQ_HANDLED;
-}
-
-void mipi_dsi_buf_release(struct dsi_buf *dp)
-{
-	kfree(dp->start);
-	dp->start = NULL;
-	dp->end = NULL;
-	dp->data = NULL;
-	dp->size = 0;
-	dp->len = 0;
 }

@@ -1,7 +1,7 @@
 /* drivers/video/msm/mipi_r63306_panels/mipi_sharp_ls043k3sx01.c
  *
  * Copyright (C) [2011] Sony Ericsson Mobile Communications AB.
- * Copyright (C) [2012] Sony Mobile Communications AB.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2; as
@@ -10,9 +10,9 @@
  */
 
 
-#include "../msm_fb.h"
-#include "../mipi_dsi.h"
-#include "../mipi_dsi_panel_driver.h"
+#include "msm_fb.h"
+#include "mipi_dsi.h"
+#include "mipi_dsi_panel.h"
 
 /* Initial Sequence */
 static char mcap[] = {
@@ -73,7 +73,7 @@ static char read_ddb_start[] = {
 	0xA1, 0x00
 };
 
-static struct dsi_cmd_desc display_init_cmd_seq[] = {
+static struct dsi_cmd_desc sharp_display_init_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 120,
 		sizeof(exit_sleep), exit_sleep},
 	{DTYPE_GEN_WRITE2, 1, 0, 0, 0,
@@ -98,44 +98,20 @@ static struct dsi_cmd_desc display_init_cmd_seq[] = {
 		sizeof(mcap_lock), mcap_lock},
 };
 
-static struct dsi_cmd_desc display_on_cmd_seq[] = {
+static struct dsi_cmd_desc sharp_display_on_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
 		sizeof(display_on), display_on},
 };
 
-static struct dsi_cmd_desc display_off_cmd_seq[] = {
+static struct dsi_cmd_desc sharp_display_off_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
 		sizeof(display_off), display_off},
 	{DTYPE_DCS_WRITE, 1, 0, 0, 120,
 		sizeof(enter_sleep), enter_sleep}
 };
 
-static struct dsi_cmd_desc read_ddb_cmd_seq[] = {
+static struct dsi_cmd_desc read_ddb_start_cmds[] = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(read_ddb_start), read_ddb_start},
-};
-
-static const struct panel_cmd display_init_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_init_cmd_seq,
-				ARRAY_SIZE(display_init_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd display_on_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_on_cmd_seq,
-				ARRAY_SIZE(display_on_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd display_off_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_off_cmd_seq,
-				ARRAY_SIZE(display_off_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd read_ddb_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {read_ddb_cmd_seq,
-				ARRAY_SIZE(read_ddb_cmd_seq)} } },
-	{CMD_END, {} },
 };
 
 static const struct mipi_dsi_phy_ctrl dsi_video_mode_phy_db[] = {
@@ -202,7 +178,6 @@ static struct msm_panel_info *get_panel_info(void)
 	pinfo.mipi.tx_eot_append = TRUE;
 	pinfo.mipi.t_clk_post = 0x04;
 	pinfo.mipi.t_clk_pre = 0x1b;
-	pinfo.mipi.esc_byte_ratio = 2;
 	pinfo.mipi.stream = 0; /* dma_p */
 	pinfo.mipi.mdp_trigger = DSI_CMD_TRIGGER_SW;
 	pinfo.mipi.dma_trigger = DSI_CMD_TRIGGER_SW;
@@ -215,10 +190,13 @@ static struct msm_panel_info *get_panel_info(void)
 
 static struct dsi_controller dsi_video_controller_panel = {
 	.get_panel_info = get_panel_info,
-	.display_init = display_init_cmds,
-	.display_on = display_on_cmds,
-	.display_off = display_off_cmds,
-	.read_id = read_ddb_cmds,
+	.display_init_cmds = sharp_display_init_cmds,
+	.display_on_cmds = sharp_display_on_cmds,
+	.display_off_cmds = sharp_display_off_cmds,
+	.read_id_cmds = read_ddb_start_cmds,
+	.display_init_cmds_size = ARRAY_SIZE(sharp_display_init_cmds),
+	.display_on_cmds_size = ARRAY_SIZE(sharp_display_on_cmds),
+	.display_off_cmds_size = ARRAY_SIZE(sharp_display_off_cmds),
 };
 
 static char ddb_val_id_old[] = {
@@ -241,7 +219,7 @@ static char default_ddb_val[] = {
 	0x12, 0x57, 0x97, 0x66
 };
 
-const struct panel sharp_ls043k3sx01_panel_id_old = {
+const struct panel_id sharp_ls043k3sx01_panel_id_old = {
 	.name = "mipi_video_sharp_wxga_ls043k3sx01_id_old_struct",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val_id_old,
@@ -250,47 +228,39 @@ const struct panel sharp_ls043k3sx01_panel_id_old = {
 	.height = 95,
 };
 
-const struct panel sharp_ls043k3sx01_panel_id_1a = {
+const struct panel_id sharp_ls043k3sx01_panel_id_1a = {
 	.name = "mipi_video_sharp_wxga_ls043k3sx01_id_1a",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val_1a,
 	.id_num = ARRAY_SIZE(ddb_val_1a),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls043k3sx01",
-	.panel_rev = "1a",
 };
 
-const struct panel sharp_ls043k3sx01_panel_id = {
+const struct panel_id sharp_ls043k3sx01_panel_id = {
 	.name = "mipi_video_sharp_wxga_ls043k3sx01",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val,
 	.id_num = ARRAY_SIZE(ddb_val),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls043k3sx01",
-	.panel_rev = "generic",
 };
 
-const struct panel sharp_ls043k3sx01_panel_default_old = {
+const struct panel_id sharp_ls043k3sx01_panel_default_old = {
 	.name = "mipi_sharp_panel_old_struct",
 	.pctrl = &dsi_video_controller_panel,
 	.id = default_ddb_val_old,
 	.id_num = ARRAY_SIZE(default_ddb_val_old),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls043k3sx01",
-	.panel_rev = "default_old",
 };
 
-const struct panel sharp_ls043k3sx01_panel_default = {
+const struct panel_id sharp_ls043k3sx01_panel_default = {
 	.name = "mipi_sharp_panel",
 	.pctrl = &dsi_video_controller_panel,
 	.id = default_ddb_val,
 	.id_num = ARRAY_SIZE(default_ddb_val),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls043k3sx01",
-	.panel_rev = "default",
 };
 

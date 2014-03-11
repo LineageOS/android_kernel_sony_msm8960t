@@ -19,6 +19,7 @@ struct as3676_platform_led {
 	u32 max_current_uA; /* This leds maximum current in mA */
 	u32 startup_current_uA; /* On driver load this brightness will be set,
 				   useful for early backlight, etc. */
+	bool use_dls;
 };
 
 struct as3676_platform_data {
@@ -28,7 +29,10 @@ struct as3676_platform_data {
 					       curr30, curr31, curr32, curr33
 					      */
 	u8 step_up_vtuning;                  /* 0 .. 31 uA on DCDC_FB */
+	bool reset_on_i2c_shutdown;
 	bool step_up_lowcur;
+	u8 caps_mounted_on_dcdc_feedback;    /* Decides which DCDC startup
+						sequence to use */
 	u8 audio_speed_down;                 /* 0..3 resp. 0, 200, 400, 800ms */
 	u8 audio_speed_up;                   /* 0..7 resp. 0, 50, 100, 150,
 							 200,250,400, 800ms */
@@ -38,6 +42,8 @@ struct as3676_platform_data {
 						       12, 18, 24, 30 dB */
 	u8 audio_source;                     /* 0,2,3: 0=curr33, 1=DCDC_FB
 						       2=GPIO1,  3=GPIO2 */
+	u8 cp_control;                       /* Charge Pump and Step Up DC/DC */
+	u16 ldo_voltage;           /* Set LDO Output Voltage in mV, 1800-3350 */
 };
 
 #endif /* __LINUX_as3676_H */

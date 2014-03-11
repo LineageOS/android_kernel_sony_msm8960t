@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -58,5 +58,8 @@ struct ispif_isr_queue_cmd {
 
 #define VIDIOC_MSM_ISPIF_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 18, struct ispif_cfg_data*)
+
+#define VIDIOC_MSM_ISPIF_REL \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 19, struct ispif_cfg_data*)
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -89,7 +89,6 @@ struct msm_actuator_ctrl_t {
 	uint16_t initial_code;
 	struct msm_camera_i2c_reg_tbl *i2c_reg_tbl;
 	uint16_t i2c_tbl_index;
-	uint32_t curr_hwparams;
 };
 
 struct msm_actuator_ctrl_t *get_actrl(struct v4l2_subdev *sd);
