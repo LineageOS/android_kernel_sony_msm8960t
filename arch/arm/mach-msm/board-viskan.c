@@ -1,5 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,9 +29,6 @@
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
 #endif
-#ifdef CONFIG_NFC_PN544
-#include <linux/pn544.h>
-#endif
 #include <linux/clearpad.h>
 #include <linux/cyttsp-qc.h>
 #include <linux/dma-contiguous.h>
@@ -46,8 +42,6 @@
 #include <linux/memory.h>
 #include <linux/memblock.h>
 #include <linux/msm_thermal.h>
-#include <linux/persistent_ram.h>
-#include <linux/list.h>
 #include <linux/console.h>
 
 #ifdef CONFIG_LEDS_AS3676
@@ -69,6 +63,10 @@
 #ifdef CONFIG_INPUT_APDS9702
 #include <linux/apds9702.h>
 #endif
+
+#include <linux/persistent_ram.h>
+#include <linux/list.h>
+
 #ifdef CONFIG_INPUT_LSM303DLHC_ACCELEROMETER_LT
 #include <linux/lsm303dlhc_acc_lt.h>
 #endif
@@ -128,8 +126,8 @@
 #include <mach/msm_cache_dump.h>
 #include <mach/scm.h>
 #include <mach/iommu_domains.h>
-#include <mach/kgsl.h>
 
+#include <mach/kgsl.h>
 #include <linux/fmem.h>
 
 #include "timer.h"
@@ -144,13 +142,6 @@
 #include "clock.h"
 #include "smd_private.h"
 #include "pm-boot.h"
-
-#ifdef CONFIG_FB_MSM_MHL_SII8334
-#include <linux/mhl_sii8334.h>
-#include <linux/mfd/pm8xxx/pm8921-charger.h>
-#include <linux/usb/msm_hsusb.h>
-#endif
-
 #include "msm_watchdog.h"
 
 #if defined(CONFIG_BT) && defined(CONFIG_BT_HCIUART_ATH3K)
@@ -158,12 +149,18 @@
 #include <linux/mutex.h>
 #endif
 
-#ifdef CONFIG_RAMDUMP_TAGS
-#include "board-rdtags.h"
-#endif
-
 #ifdef CONFIG_USB_NCP373
 #include <linux/usb/ncp373.h>
+#endif
+
+#ifdef CONFIG_NFC_PN544
+#include <linux/pn544.h>
+#endif
+
+#ifdef CONFIG_FB_MSM_MHL_SII8334
+#include <linux/mhl_sii8334.h>
+#include <linux/mfd/pm8xxx/pm8921-charger.h>
+#include <linux/usb/msm_hsusb.h>
 #endif
 
 static struct platform_device msm_fm_platform_init = {
@@ -261,11 +258,7 @@ early_param("pmem_audio_size", pmem_audio_size_setup);
 #define CYTTSP4_LDR_TCH_ADR 0x24
 
 #define CYTTSP4_I2C_IRQ_GPIO 11
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-#define CYTTSP4_I2C_RST_GPIO 32
-#else
 #define CYTTSP4_I2C_RST_GPIO 6
-#endif
 #endif
 
 #ifdef CONFIG_TOUCHSCREEN_CYPRESS_CYTTSP4_SPI
@@ -672,11 +665,7 @@ static void __init sony_viskan_cyttsp4_init(void)
 */
 #ifdef CONFIG_NFC_PN544
 #define PMIC_GPIO_NFC_EN	(33)
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-#define MSM_GPIO_NFC_FWDL_EN	(52)
-#else
 #define MSM_GPIO_NFC_FWDL_EN	(19)
-#endif
 #define MSM_GPIO_NFC_IRQ	(106)
 #endif
 
@@ -1438,90 +1427,6 @@ static void __init msm8960_allocate_memory_regions(void)
 	msm8960_allocate_fb_region();
 }
 
-#ifdef CONFIG_WCD9310_CODEC
-
-#define TABLA_INTERRUPT_BASE (NR_MSM_IRQS + NR_GPIO_IRQS + NR_PM8921_IRQS)
-
-/* Micbias setting is based on 8660 CDP/MTP/FLUID requirement
- * 4 micbiases are used to power various analog and digital
- * microphones operating at 1800 mV. Technically, all micbiases
- * can source from single cfilter since all microphones operate
- * at the same voltage level. The arrangement below is to make
- * sure all cfilters are exercised. LDO_H regulator ouput level
- * does not need to be as high as 2.85V. It is choosen for
- * microphone sensitivity purpose.
- */
-static struct wcd9xxx_pdata tabla_platform_data = {
-	.slimbus_slave_device = {
-		.name = "tabla-slave",
-		.e_addr = {0, 0, 0x10, 0, 0x17, 2},
-	},
-	.irq = MSM_GPIO_TO_INT(62),
-	.irq_base = TABLA_INTERRUPT_BASE,
-	.num_irqs = NR_WCD9XXX_IRQS,
-	.reset_gpio = PM8921_GPIO_PM_TO_SYS(34),
-	.micbias = {
-		.ldoh_v = TABLA_LDOH_2P85_V,
-		.cfilt1_mv = 2700,
-		.cfilt2_mv = 2700,
-		.cfilt3_mv = 2700,
-		.bias1_cfilt_sel = TABLA_CFILT1_SEL,
-		.bias2_cfilt_sel = TABLA_CFILT2_SEL,
-		.bias3_cfilt_sel = TABLA_CFILT1_SEL,
-		.bias4_cfilt_sel = TABLA_CFILT1_SEL,
-		.bias1_cap_mode = 1,
-		.bias2_cap_mode = 1,
-		.bias3_cap_mode = 0,
-		.bias4_cap_mode = 1,
-	},
-	.regulator = {
-	{
-		.name = "CDC_VDD_CP",
-		.min_uV = 1800000,
-		.max_uV = 1800000,
-		.optimum_uA = WCD9XXX_CDC_VDDA_CP_CUR_MAX,
-	},
-	{
-		.name = "CDC_VDDA_RX",
-		.min_uV = 1800000,
-		.max_uV = 1800000,
-		.optimum_uA = WCD9XXX_CDC_VDDA_RX_CUR_MAX,
-	},
-	{
-		.name = "CDC_VDDA_TX",
-		.min_uV = 1800000,
-		.max_uV = 1800000,
-		.optimum_uA = WCD9XXX_CDC_VDDA_TX_CUR_MAX,
-	},
-	{
-		.name = "VDDIO_CDC",
-		.min_uV = 1800000,
-		.max_uV = 1800000,
-		.optimum_uA = WCD9XXX_VDDIO_CDC_CUR_MAX,
-	},
-	{
-		.name = "VDDD_CDC_D",
-		.min_uV = 1225000,
-		.max_uV = 1250000,
-		.optimum_uA = WCD9XXX_VDDD_CDC_D_CUR_MAX,
-	},
-	{
-		.name = "CDC_VDDA_A_1P2V",
-		.min_uV = 1225000,
-		.max_uV = 1250000,
-		.optimum_uA = WCD9XXX_VDDD_CDC_A_CUR_MAX,
-	},
-	},
-};
-
-static struct slim_device msm_slim_tabla = {
-	.name = "tabla-slim",
-	.e_addr = {0, 1, 0x10, 0, 0x17, 2},
-	.dev = {
-		.platform_data = &tabla_platform_data,
-	},
-};
-
 #ifdef CONFIG_FB_MSM_MHL_SII8334
 
 #define MSM_GPIO_MHL_RESET_N	(64)
@@ -1637,6 +1542,90 @@ static struct mhl_sii_platform_data mhl_sii_pdata = {
 	.charging_enable = mhl_sii_charging_enable,
 };
 #endif /* CONFIG_FB_MSM_MHL_SII8334 */
+
+#ifdef CONFIG_WCD9310_CODEC
+
+#define TABLA_INTERRUPT_BASE (NR_MSM_IRQS + NR_GPIO_IRQS + NR_PM8921_IRQS)
+
+/* Micbias setting is based on 8660 CDP/MTP/FLUID requirement
+ * 4 micbiases are used to power various analog and digital
+ * microphones operating at 1800 mV. Technically, all micbiases
+ * can source from single cfilter since all microphones operate
+ * at the same voltage level. The arrangement below is to make
+ * sure all cfilters are exercised. LDO_H regulator ouput level
+ * does not need to be as high as 2.85V. It is choosen for
+ * microphone sensitivity purpose.
+ */
+static struct wcd9xxx_pdata tabla_platform_data = {
+	.slimbus_slave_device = {
+		.name = "tabla-slave",
+		.e_addr = {0, 0, 0x10, 0, 0x17, 2},
+	},
+	.irq = MSM_GPIO_TO_INT(62),
+	.irq_base = TABLA_INTERRUPT_BASE,
+	.num_irqs = NR_WCD9XXX_IRQS,
+	.reset_gpio = PM8921_GPIO_PM_TO_SYS(34),
+	.micbias = {
+		.ldoh_v = TABLA_LDOH_2P85_V,
+		.cfilt1_mv = 2700,
+		.cfilt2_mv = 2700,
+		.cfilt3_mv = 2700,
+		.bias1_cfilt_sel = TABLA_CFILT1_SEL,
+		.bias2_cfilt_sel = TABLA_CFILT2_SEL,
+		.bias3_cfilt_sel = TABLA_CFILT1_SEL,
+		.bias4_cfilt_sel = TABLA_CFILT1_SEL,
+		.bias1_cap_mode = 1,
+		.bias2_cap_mode = 1,
+		.bias3_cap_mode = 0,
+		.bias4_cap_mode = 1,
+	},
+	.regulator = {
+	{
+		.name = "CDC_VDD_CP",
+		.min_uV = 1800000,
+		.max_uV = 1800000,
+		.optimum_uA = WCD9XXX_CDC_VDDA_CP_CUR_MAX,
+	},
+	{
+		.name = "CDC_VDDA_RX",
+		.min_uV = 1800000,
+		.max_uV = 1800000,
+		.optimum_uA = WCD9XXX_CDC_VDDA_RX_CUR_MAX,
+	},
+	{
+		.name = "CDC_VDDA_TX",
+		.min_uV = 1800000,
+		.max_uV = 1800000,
+		.optimum_uA = WCD9XXX_CDC_VDDA_TX_CUR_MAX,
+	},
+	{
+		.name = "VDDIO_CDC",
+		.min_uV = 1800000,
+		.max_uV = 1800000,
+		.optimum_uA = WCD9XXX_VDDIO_CDC_CUR_MAX,
+	},
+	{
+		.name = "VDDD_CDC_D",
+		.min_uV = 1225000,
+		.max_uV = 1250000,
+		.optimum_uA = WCD9XXX_VDDD_CDC_D_CUR_MAX,
+	},
+	{
+		.name = "CDC_VDDA_A_1P2V",
+		.min_uV = 1225000,
+		.max_uV = 1250000,
+		.optimum_uA = WCD9XXX_VDDD_CDC_A_CUR_MAX,
+	},
+	},
+};
+
+static struct slim_device msm_slim_tabla = {
+	.name = "tabla-slim",
+	.e_addr = {0, 1, 0x10, 0, 0x17, 2},
+	.dev = {
+		.platform_data = &tabla_platform_data,
+	},
+};
 
 static struct wcd9xxx_pdata tabla20_platform_data = {
 	.slimbus_slave_device = {
@@ -2048,20 +2037,6 @@ static struct platform_device qcedev_device = {
 };
 #endif
 
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-static struct mdm_platform_data sglte_platform_data = {
-	.mdm_version = "4.0",
-	.ramdump_delay_ms = 1000,
-	/* delay between two PS_HOLDs */
-	.ps_hold_delay_ms = 500,
-	.soft_reset_inverted = 1,
-	.peripheral_platform_device = NULL,
-	.ramdump_timeout_ms = 600000,
-	.no_powerdown_after_ramdumps = 1,
-	.image_upgrade_supported = 1,
-};
-#endif
-
 #define MSM_TSIF0_PHYS			(0x18200000)
 #define MSM_TSIF1_PHYS			(0x18201000)
 #define MSM_TSIF_SIZE			(0x200)
@@ -2330,11 +2305,7 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 
 #ifdef CONFIG_USB_NCP373
 #define GPIO_USB_OTG_EN		51
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-#define GPIO_OTG_OVRCUR_DET_N	43
-#else
 #define GPIO_OTG_OVRCUR_DET_N	37
-#endif
 #define GPIO_OTG_OVP_CNTL	PM8921_GPIO_PM_TO_SYS(42)
 
 struct ncp373_res_hdl {
@@ -3244,9 +3215,6 @@ static struct msm_i2c_platform_data msm8960_i2c_qup_gsbi3_pdata = {
 static struct msm_i2c_platform_data msm8960_i2c_qup_gsbi10_pdata = {
 	.clk_freq = 355000,
 	.src_clk_rate = 24000000,
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-	.keep_ahb_clk_on = true,
-#endif
 };
 
 static struct msm_i2c_platform_data msm8960_i2c_qup_gsbi12_pdata = {
@@ -3306,17 +3274,6 @@ static struct platform_device battery_bcl_device = {
 };
 #endif
 
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-static struct platform_device msm8960_device_ext_otg_sw_vreg __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= PM8921_GPIO_PM_TO_SYS(42),
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_OTG_SW],
-	},
-};
-#endif
-
 static struct platform_device msm8960_device_rpm_regulator __devinitdata = {
 	.name	= "rpm-regulator",
 	.id	= -1,
@@ -3325,29 +3282,6 @@ static struct platform_device msm8960_device_rpm_regulator __devinitdata = {
 	},
 };
 
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-#ifdef CONFIG_SERIAL_MSM_HS
-static struct msm_serial_hs_platform_data msm_uart_dm9_pdata = {
-	.config_gpio		= 4,
-	.uart_tx_gpio		= 93,
-	.uart_rx_gpio		= 94,
-	.uart_cts_gpio		= 95,
-	.uart_rfr_gpio		= 96,
-};
-
-static struct msm_serial_hs_platform_data msm_uart_dm8_pdata = {
-	.config_gpio		= 4,
-	.uart_tx_gpio		= 34,
-	.uart_rx_gpio		= 35,
-	.uart_cts_gpio		= 36,
-	.uart_rfr_gpio		= 37,
-	.uartdm_rx_buf_size	= 1024,
-};
-#else
-static struct msm_serial_hs_platform_data msm_uart_dm8_pdata;
-static struct msm_serial_hs_platform_data msm_uart_dm9_pdata;
-#endif
-#endif
 
 #if defined(CONFIG_BT) && defined(CONFIG_BT_HCIUART_ATH3K)
 enum WLANBT_STATUS {
@@ -3504,13 +3438,6 @@ static void __init bt_power_init(void)
 #define bt_power_init(x) do {} while (0)
 #endif
 
-#ifdef CONFIG_SONY_SSM
-static struct platform_device sony_ssm_device = {
-	.name = "sony_ssm",
-	.id = -1,
-};
-#endif
-
 static struct platform_device *common_devices[] __initdata = {
 	&msm8960_device_dmov,
 	&msm_device_smd,
@@ -3519,9 +3446,6 @@ static struct platform_device *common_devices[] __initdata = {
 	&msm_device_saw_core1,
 	&msm8960_device_ext_5v_vreg,
 	&msm8960_device_ssbi_pmic,
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-	&msm8960_device_ext_otg_sw_vreg,
-#endif
 #ifdef CONFIG_SPI_QUP
 	&msm8960_device_qup_spi_gsbi1,
 #endif
@@ -3605,9 +3529,6 @@ static struct platform_device *common_devices[] __initdata = {
 	&msm_tsens_device,
 	&msm8960_pc_cntr,
 	&msm8960_cpu_slp_status,
-#ifdef CONFIG_SONY_SSM
-	&sony_ssm_device,
-#endif
 #ifdef CONFIG_SONY_QSCFLASHING_UART4
 	&msm8960_device_uart_gsbi11,
 #endif
@@ -3784,6 +3705,7 @@ static struct msm_rpmrs_level msm_rpmrs_levels[] = {
 		20000, 2, 5752000, 32000,
 	},
 };
+
 
 static struct msm_rpmrs_platform_data msm_rpmrs_data __initdata = {
 	.levels = &msm_rpmrs_levels[0],
@@ -4193,22 +4115,6 @@ static void __init msm8960_init_smsc_hub(void)
 	if (machine_is_msm8960_liquid())
 		platform_device_register(&smsc_hub_device);
 }
-static struct i2c_board_info gsbi3_peripherals_info[] __initdata = {
-#ifdef CONFIG_TOUCHSCREEN_CLEARPAD
-	{
-		/* Config-spec is 8-bit = 0x58, src-code need 7-bit => 0x2c */
-		I2C_BOARD_INFO(CLEARPADI2C_NAME, 0x58 >> 1),
-		.platform_data = &clearpad_platform_data,
-	},
-#endif
-#ifdef CONFIG_TOUCHSCREEN_CYPRESS_CYTTSP4_I2C
-	{
-		I2C_BOARD_INFO(CYTTSP4_I2C_NAME, CYTTSP4_I2C_TCH_ADR),
-		.irq =  MSM_GPIO_TO_INT(CYTTSP4_I2C_IRQ_GPIO),
-		.platform_data = CYTTSP4_I2C_NAME,
-	}
-#endif
-};
 
 static struct i2c_board_info gsbi10_peripherals_info[] __initdata = {
 #ifdef CONFIG_LEDS_AS3676
@@ -4255,6 +4161,23 @@ static struct i2c_board_info gsbi10_peripherals_info[] __initdata = {
 		I2C_BOARD_INFO(LM3561_DRV_NAME, 0xA6 >> 1),
 		.platform_data = &lm3561_platform_data,
 	},
+#endif
+};
+
+static struct i2c_board_info gsbi3_peripherals_info[] __initdata = {
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD
+	{
+		/* Config-spec is 8-bit = 0x58, src-code need 7-bit => 0x2c */
+		I2C_BOARD_INFO(CLEARPADI2C_NAME, 0x58 >> 1),
+		.platform_data = &clearpad_platform_data,
+	},
+#endif
+#ifdef CONFIG_TOUCHSCREEN_CYPRESS_CYTTSP4_I2C
+	{
+		I2C_BOARD_INFO(CYTTSP4_I2C_NAME, CYTTSP4_I2C_TCH_ADR),
+		.irq =  MSM_GPIO_TO_INT(CYTTSP4_I2C_IRQ_GPIO),
+		.platform_data = CYTTSP4_I2C_NAME,
+	}
 #endif
 };
 
@@ -4350,7 +4273,8 @@ static void __init msm8960_tsens_init(void)
 
 static void __init msm8960ab_update_krait_spm(void)
  {
-	int i;
+ 	int i;
+ 
 
 	/* Update the SPM sequences for SPC and PC */
 	for (i = 0; i < ARRAY_SIZE(msm_spm_data); i++) {
@@ -4437,21 +4361,7 @@ static void __init msm8960_cdp_init(void)
 	}
 	platform_device_register(&msm8960_device_uart_gsbi8);
 
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-	/* For 8960 Fusion 2.2 Primary IPC */
-	if (socinfo_get_platform_subtype() == PLATFORM_SUBTYPE_SGLTE) {
-		msm_uart_dm9_pdata.wakeup_irq = gpio_to_irq(94); /* GSBI9(2) */
-		msm_device_uart_dm9.dev.platform_data = &msm_uart_dm9_pdata;
-	}
-#endif
 	platform_device_register(&msm_device_uart_dm9);
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-	/* For 8960 Standalone External Bluetooth Interface */
-	if (socinfo_get_platform_subtype() != PLATFORM_SUBTYPE_SGLTE) {
-		msm_device_uart_dm8.dev.platform_data = &msm_uart_dm8_pdata;
-		platform_device_register(&msm_device_uart_dm8);
-	}
-#endif
 
 	if (cpu_is_msm8960ab())
 		platform_device_register(&msm8960ab_device_acpuclk);
@@ -4480,16 +4390,8 @@ static void __init msm8960_cdp_init(void)
 #ifdef CONFIG_TOUCHSCREEN_CYPRESS_CYTTSP4
 	sony_viskan_cyttsp4_init();
 #endif
-
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-	if (socinfo_get_platform_subtype() == PLATFORM_SUBTYPE_SGLTE) {
-		mdm_sglte_device.dev.platform_data = &sglte_platform_data;
-		platform_device_register(&mdm_sglte_device);
-	}
-#endif
 }
 
-#ifdef CONFIG_MACH_VISKAN_HUASHAN
 MACHINE_START(VISKAN_HUASHAN, "VISKAN HUASHAN")
 	.map_io = msm8960_map_io,
 	.reserve = msm8960_reserve,
@@ -4501,21 +4403,7 @@ MACHINE_START(VISKAN_HUASHAN, "VISKAN HUASHAN")
 	.init_very_early = msm8960_early_memory,
 	.restart = msm_restart,
 MACHINE_END
-#endif
 
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-MACHINE_START(VISKAN_HUASHAN_CT, "VISKAN HUASHAN_CT")
-	.map_io = msm8960_map_io,
-	.reserve = msm8960_reserve,
-	.init_irq = msm8960_init_irq,
-	.handle_irq = gic_handle_irq,
-	.timer = &msm_timer,
-	.init_machine = msm8960_cdp_init,
-	.init_early = msm8960_allocate_memory_regions,
-	.init_very_early = msm8960_early_memory,
-	.restart = msm_restart,
-MACHINE_END
-#endif
 struct viskan_mbhc_data viskan_mbhc_data = {
 	.v_hs_max = 2850,
 	.hs_detect_extn_cable = false,

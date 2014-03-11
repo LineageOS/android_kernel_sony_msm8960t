@@ -1,5 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -647,8 +646,8 @@ static struct pm8921_platform_data pm8921_platform_data __devinitdata = {
 	.adc_pdata		= &pm8xxx_adc_pdata,
 	.leds_pdata		= &pm8xxx_leds_pdata,
 	.ccadc_pdata		= &pm8xxx_ccadc_pdata,
+	.vibrator_pdata		= &pm8xxx_vibrator_pdata,
 	.pwm_pdata		= &pm8xxx_pwm_pdata,
-	.vibrator_pdata	= &pm8xxx_vibrator_pdata,
 };
 
 static struct msm_ssbi_platform_data msm8960_ssbi_pm8921_pdata __devinitdata = {

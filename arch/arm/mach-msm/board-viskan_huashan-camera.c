@@ -1,5 +1,5 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,16 +17,16 @@
 #include <mach/camera.h>
 #include <mach/msm_bus_board.h>
 #include <mach/gpiomux.h>
-#if defined(CONFIG_SONY_CAM_V4L2)
+#include "devices.h"
+#include "board-8960.h"
+
 #ifdef CONFIG_MSM_CAMERA
+#if defined(CONFIG_SONY_CAM_V4L2)
 #include <mach/camera.h>
 #include <media/sony_camera_v4l2.h>
 #include <linux/v4l2-mediabus.h>
 #endif
 #endif
-
-#include "devices.h"
-#include "board-8960.h"
 
 #ifdef CONFIG_MSM_CAMERA
 

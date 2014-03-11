@@ -308,10 +308,10 @@ obj-$(CONFIG_MACH_SAPPHIRE) += board-sapphire-rfkill.o msm_vibrator.o
 obj-$(CONFIG_MACH_LGE) += lge/
 
 #viskan
-board-sony_viskan-all-objs += board-sony_viskan.o board-sony_viskan-display.o board-sony_viskan-storage.o
+board-viskan-all-objs += board-viskan.o board-viskan-display.o board-viskan-storage.o
 
-obj-$(CONFIG_MACH_VISKAN_HUASHAN) += board-sony_viskan-all.o board-sony_viskan_huashan-gpiomux.o board-sony_viskan_huashan-pmic.o board-sony_viskan_huashan-regulator.o
-obj-$(CONFIG_MACH_VISKAN_HUASHAN) += board-sony_viskan_huashan-camera.o bms-batterydata-sleipner.o
+obj-$(CONFIG_MACH_VISKAN_HUASHAN) += board-viskan-all.o board-viskan_huashan-gpiomux.o board-viskan_huashan-pmic.o board-viskan_huashan-regulator.o bms-batterydata-sleipner.o
+obj-$(CONFIG_MACH_VISKAN_HUASHAN) += board-viskan_huashan-camera.o
 
 CFLAGS_msm_vibrator.o += -Idrivers/staging/android
 CFLAGS_board-9615.o += -Idrivers/usb/gadget

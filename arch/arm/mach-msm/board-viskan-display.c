@@ -1,5 +1,5 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2012-2013 Sony Mobile Communications AB.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,6 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
 #include <linux/msm_ion.h>
+#include <linux/gpio.h>
 #include <asm/mach-types.h>
 #include <mach/msm_bus_board.h>
 #include <mach/msm_memtypes.h>
@@ -24,7 +25,6 @@
 #include <mach/gpiomux.h>
 #include <mach/ion.h>
 #include <mach/socinfo.h>
-#include <linux/gpio.h>
 
 #include "devices.h"
 #include "board-8960.h"
@@ -119,7 +119,6 @@ static int msm_fb_detect_panel(const char *name)
 			strnlen(TVOUT_PANEL_NAME,
 				PANEL_NAME_MAX_LEN)))
 		return 0;
-
 	pr_warning("%s: not supported '%s'", __func__, name);
 	return -ENODEV;
 }
@@ -137,11 +136,7 @@ static struct platform_device msm_fb_device = {
 };
 
 #define MLCD_RESET_N 43
-#ifdef CONFIG_MACH_VISKAN_HUASHAN_CT
-#define LCD_PWR_EN 42
-#else
 #define LCD_PWR_EN 36
-#endif
 #define LCD_VREG_ON_WAIT_MS 10
 #define LCD_RESET_WAIT_MS 10
 #define LCD_POWER_WAIT_MS 50
@@ -436,30 +431,30 @@ static int r63306_vreg_power(int on)
 	}
 
 	if (on) {
-		rc = regulator_set_voltage(vreg_lcd_vddio, 1800000, 1800000);
-		if (rc) {
-			pr_err("%s:%d unable to set dsi_vddio voltage to 1.8V\n",
-				__func__, rc);
-			goto out_put_all;
-		}
-
-		rc = regulator_enable(vreg_lcd_vddio);
-		if (rc) {
-			pr_err("%s: Enable regulator dsi_vddio failed\n",
-				__func__);
-			goto out_put_all;
-		}
-
 		rc = regulator_set_voltage(vreg_lcd_vci, 2850000, 2850000);
 		if (rc) {
 			pr_err("%s:%d unable to set dsi_vci voltage to 2.8V\n",
 				__func__, rc);
-			goto out_disable;
+			goto out_put_all;
 		}
 
 		rc = regulator_enable(vreg_lcd_vci);
 		if (rc) {
 			pr_err("%s: Enable regulator dsi_vci failed\n",
+				__func__);
+			goto out_put_all;
+		}
+
+		rc = regulator_set_voltage(vreg_lcd_vddio, 1800000, 1800000);
+		if (rc) {
+			pr_err("%s:%d unable to set dsi_vddio voltage to 1.8V\n",
+				__func__, rc);
+			goto out_disable;
+		}
+
+		rc = regulator_enable(vreg_lcd_vddio);
+		if (rc) {
+			pr_err("%s: Enable regulator dsi_vddio failed\n",
 				__func__);
 			goto out_disable;
 		}
@@ -483,23 +478,21 @@ static int r63306_vreg_power(int on)
 			return -EINVAL;
 		}
 
-		rc = regulator_disable(vreg_lcd_vci);
-		if (rc)
-			pr_warning("%s: '%s' regulator disable failed, rc=%d\n",
-				__func__, "dsi_vci", rc);
-
 		rc = regulator_disable(vreg_lcd_vddio);
 		if (rc)
 			pr_warning("%s: '%s' regulator disable failed, rc=%d\n",
 				__func__, "dsi_vddio", rc);
-
+		rc = regulator_disable(vreg_lcd_vci);
+		if (rc)
+			pr_warning("%s: '%s' regulator disable failed, rc=%d\n",
+				__func__, "dsi_vci", rc);
 	}
 
 	return 0;
 out_disable_all:
-	regulator_disable(vreg_lcd_vci);
-out_disable:
 	regulator_disable(vreg_lcd_vddio);
+out_disable:
+	regulator_disable(vreg_lcd_vci);
 out_put_all:
 	regulator_put(vreg_lcd_vddio);
 	vreg_lcd_vddio = NULL;
@@ -991,6 +984,7 @@ static struct msm_panel_common_pdata mdp_pdata = {
 #else
 	.mem_hid = MEMTYPE_EBI1,
 #endif
+
 	.mdp_iommu_split_domain = 0,
 };
 
@@ -1114,7 +1108,6 @@ static int hdmi_panel_power(int on)
 	pr_debug("%s: HDMI Core: %s Success\n", __func__, (on ? "ON" : "OFF"));
 	return rc;
 }
-
 #endif
 
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
@@ -1288,15 +1281,14 @@ void __init msm8960_init_fb(void)
 	if (cpu_is_msm8960ab())
 		mdp_pdata.mdp_rev = MDP_REV_44;
 
-#ifdef CONFIG_FB_MSM_WRITEBACK_MSM_PANEL
-	platform_device_register(&wfd_device);
-#endif
-
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 	platform_device_register(&hdmi_msm_device);
 #endif
 	mipi_dsi_panel_add_device();
 	platform_device_register(&msm_fb_device);
+#ifdef CONFIG_FB_MSM_WRITEBACK_MSM_PANEL
+	platform_device_register(&wfd_device);
+#endif
 	msm_fb_register_device("mdp", &mdp_pdata);
 	msm_fb_register_device("mipi_dsi", &mipi_dsi_pdata);
 #ifdef CONFIG_MSM_BUS_SCALING
@@ -1363,6 +1355,7 @@ void __init msm8960_set_display_params(char *prim_panel, char *ext_panel)
 			hdmi_is_primary = 1;
 			set_mdp_clocks_for_wuxga();
 		}
+
 		if (!strncmp((char *)msm_fb_pdata.prim_panel_name,
 				MIPI_VIDEO_TOSHIBA_WUXGA_PANEL_NAME,
 				strnlen(MIPI_VIDEO_TOSHIBA_WUXGA_PANEL_NAME,
