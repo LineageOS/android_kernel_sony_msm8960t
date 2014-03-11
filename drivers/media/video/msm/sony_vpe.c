@@ -28,7 +28,6 @@
 #include "msm.h"
 #include "msm_cam_server.h"
 #include "sony_vpe.h"
-
 #define MSM_VPE_NAME "msm_vpe_standalone"
 
 static int vpe_update_scaler(struct msm_pp_crop *pcrop);
@@ -627,10 +626,16 @@ static int msm_vpe_start_transfer(struct msm_vpe_transfer_cfg *transfercmd,
 		src_ionhandle = ion_import_dma_buf(vpe_client, src_info->fd);
 		if (IS_ERR_OR_NULL(src_ionhandle))
 			return 0;
+#ifdef CONFIG_MSM_IOMMU
+		rc = ion_map_iommu(vpe_client, src_ionhandle,
+				   vpe_ctrl->domain_num, 0, SZ_4K, 0,
+				   &src_paddr, &src_len, 0, 0);
+#else
 		rc = ion_phys(vpe_client,
 			      src_ionhandle,
 			      &src_paddr,
 			      (size_t *)&src_len);
+#endif
 #else
 		rc = get_pmem_file(src_info->fd,
 				   &src_paddr,
@@ -658,10 +663,16 @@ static int msm_vpe_start_transfer(struct msm_vpe_transfer_cfg *transfercmd,
 		dst_ionhandle = ion_import_dma_buf(vpe_client, dst_info->fd);
 		if (IS_ERR_OR_NULL(src_ionhandle))
 			return 0;
+#ifdef CONFIG_MSM_IOMMU
+		rc = ion_map_iommu(vpe_client, dst_ionhandle,
+				   vpe_ctrl->domain_num, 0, SZ_4K, 0,
+				   &dst_paddr, &dst_len, 0, 0);
+#else
 		rc = ion_phys(vpe_client,
 			      dst_ionhandle,
 			      &dst_paddr,
 			      (size_t *)&dst_len);
+#endif
 #else
 		rc = get_pmem_file(dst_info->fd,
 				   &dst_paddr,
@@ -726,6 +737,12 @@ static int msm_vpe_start_transfer(struct msm_vpe_transfer_cfg *transfercmd,
 
 	if (put_pmem) {
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
+#ifdef CONFIG_MSM_IOMMU
+		ion_unmap_iommu(vpe_client, dst_ionhandle,
+				vpe_ctrl->domain_num, 0);
+		ion_unmap_iommu(vpe_client, src_ionhandle,
+				vpe_ctrl->domain_num, 0);
+#endif
 		ion_free(vpe_client, dst_ionhandle);
 		ion_free(vpe_client, src_ionhandle);
 #else
@@ -776,7 +793,7 @@ static int msm_vpe_pmem_register(struct msm_vpe_register_cfg *registercmd,
 		return 0;
 #ifdef CONFIG_MSM_IOMMU
 	rc = ion_map_iommu(vpe_client, ionhandle, vpe_ctrl->domain_num, 0,
-				SZ_4K, 0, &paddr, &len, 0, 0);
+				SZ_4K, 0, &paddr, &len, UNCACHED, 0);
 #else
 	rc = ion_phys(vpe_client, ionhandle, &paddr, (size_t *)&len);
 #endif
@@ -870,6 +887,8 @@ DECLARE_TASKLET(vpe_standalone_tasklet, vpe_do_tasklet, 0);
 
 static irqreturn_t vpe_parse_irq(int irq_num, void *data)
 {
+	if (!vpe_ctrl || !vpe_ctrl->vpebase)
+		return IRQ_HANDLED;
 	vpe_ctrl->irq_status = msm_camera_io_r_mb(vpe_ctrl->vpebase +
 							VPE_INTR_STATUS_OFFSET);
 	msm_camera_io_w_mb(vpe_ctrl->irq_status, vpe_ctrl->vpebase +

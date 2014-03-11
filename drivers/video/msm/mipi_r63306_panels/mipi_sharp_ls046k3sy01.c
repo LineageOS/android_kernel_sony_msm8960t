@@ -1,6 +1,6 @@
 /* drivers/video/msm/mipi_r63306_panels/mipi_sharp_ls046k3sy01.c
  *
- * Copyright (C) [2012] Sony Mobile Communications AB.
+ * Copyright (C) [2013] Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2; as
@@ -9,9 +9,9 @@
  */
 
 
-#include "../msm_fb.h"
-#include "../mipi_dsi.h"
-#include "../mipi_dsi_panel_driver.h"
+#include "msm_fb.h"
+#include "mipi_dsi.h"
+#include "mipi_dsi_panel.h"
 
 
 /* Initial Sequence */
@@ -19,7 +19,7 @@ static char mcap[] = {
 	0xB0, 0x00
 };
 static char ltps_if_ctrl[] = {
-	0xC4, 0xC3, 0x29, 0x00
+	0xC4, 0xC3, 0x29
 };
 static char auto_cmd_refresh[] = {
 	0xB2, 0x00
@@ -55,7 +55,7 @@ static char read_ddb_start[] = {
 
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
 static char nvm_rsp1[] = {
-	0xE7, 0x00, 0x00, 0x00, 0x00
+	0xE7, 0x07, 0x0E, 0x0E, 0x35
 };
 static char dev_code[] = {
 	0xBF, 0x01, 0x22, 0x33, 0x06, 0xA4
@@ -75,7 +75,7 @@ static char test_mode4[] = {
 static char test_mode5[] = {
 	0xE4, 0xBD
 };
-static char test_mode6[] = {
+static char nvm_read_e4_reg[] = {
 	0xE4
 };
 static char test_mode7[] = {
@@ -90,7 +90,7 @@ static char nvm_erase_and_write_user[] = {
 	0xE0, 0x00
 };
 
-static char nvm_status[] = {
+static char nvm_read_e1_reg[] = {
 	0xE1
 };
 
@@ -132,7 +132,7 @@ static char vol_set[] = {
 	0xD5, 0x09, 0x09
 };
 static char vcomdc_set[] = {
-	0xDE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0xDE, 0x00, 0x00, 0x31, 0x1A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00
 };
 static char reg_wri_ctl[] = {
@@ -169,10 +169,23 @@ static char gamma_ctrl_set_b_neg[] = {
 	0xCE, 0x0E, 0x19, 0x31, 0x28, 0x2B, 0x35, 0x31,
 	0x2B, 0x39, 0x3F, 0x38, 0x2D, 0x34
 };
-#endif
 
-static struct dsi_cmd_desc display_init_cmd_seq[] = {
-	{DTYPE_DCS_WRITE, 1, 0, 0, 150,
+static char nvm_read_e6_reg[] = {
+	0xE6
+};
+static char nvm_read_e7_reg[] = {
+	0xE7
+};
+static char nvm_read_de_reg[] = {
+	0xDE
+};
+static char nvm_read_bf_reg[] = {
+	0xBF
+};
+
+#endif
+static struct dsi_cmd_desc sharp_display_init_cmds[] = {
+	{DTYPE_DCS_WRITE, 1, 0, 0, 120,
 		sizeof(exit_sleep), exit_sleep},
 	{DTYPE_GEN_WRITE2, 1, 0, 0, 0,
 		sizeof(mcap), mcap},
@@ -180,108 +193,14 @@ static struct dsi_cmd_desc display_init_cmd_seq[] = {
 		sizeof(ltps_if_ctrl), ltps_if_ctrl},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
 		sizeof(auto_cmd_refresh), auto_cmd_refresh},
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
-		sizeof(panel_driving), panel_driving},
-	{DTYPE_GEN_WRITE2, 1, 0, 0, 0,
-		sizeof(mcap_lock), mcap_lock},
-};
-
-static struct dsi_cmd_desc display_on_cmd_seq[] = {
-	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
-		sizeof(display_on), display_on},
-};
-
-static struct dsi_cmd_desc display_off_cmd_seq[] = {
-	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
-		sizeof(display_off), display_off},
-	{DTYPE_DCS_WRITE, 1, 0, 0, 120,
-		sizeof(enter_sleep), enter_sleep}
-};
-
-static struct dsi_cmd_desc read_ddb_cmd_seq[] = {
-	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(read_ddb_start), read_ddb_start},
-};
-
-static const struct panel_cmd display_init_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_init_cmd_seq,
-				ARRAY_SIZE(display_init_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd display_on_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_on_cmd_seq,
-				ARRAY_SIZE(display_on_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd display_off_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {display_off_cmd_seq,
-				ARRAY_SIZE(display_off_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
-static const struct panel_cmd read_ddb_cmds[] = {
-	{CMD_DSI, {.dsi_payload = {read_ddb_cmd_seq,
-				ARRAY_SIZE(read_ddb_cmd_seq)} } },
-	{CMD_END, {} },
-};
-
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
-static struct dsi_cmd_desc	nvm_disp_off_cmds[] = {
-	{DTYPE_DCS_WRITE, 1, 0, 0, 0, sizeof(display_off), display_off},
-	{DTYPE_DCS_WRITE, 1, 0, 0, 120, sizeof(enter_sleep), enter_sleep}
-};
-static struct dsi_cmd_desc	nvm_mcap_cmds[] = {
-	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(mcap), mcap},
-};
-static struct dsi_cmd_desc	nvm_mcap_lock_cmds[] = {
-	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(mcap_lock), mcap_lock},
-};
-static struct dsi_cmd_desc	nvm_open_cmds[] = {
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode1), test_mode1},
-};
-static struct dsi_cmd_desc	nvm_close_cmds[] = {
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode3), test_mode3},
-};
-static struct dsi_cmd_desc	nvm_status_cmds[] = {
-	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_status), nvm_status},
-};
-
-static struct dsi_cmd_desc	nvm_read_cmds[] = {
-	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_rsp1), nvm_rsp1},
-	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(vcomdc_set), vcomdc_set},
-};
-
-static struct dsi_cmd_desc	nvm_erase_cmds[] = {
-	{DTYPE_DCS_WRITE, 1, 0, 0, 200, sizeof(exit_sleep), exit_sleep},
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode4), test_mode4},
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 1300, sizeof(test_mode5), test_mode5},
-};
-static struct dsi_cmd_desc	nvm_erase_res_cmds[] = {
-	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(test_mode6), test_mode6},
-};
-
-static struct dsi_cmd_desc	nvm_write_rsp_cmds[] = {
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(nvm_rsp1), nvm_rsp1},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dev_code), dev_code},
-};
-static struct dsi_cmd_desc	nvm_flash_rsp_cmds[] = {
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode2), test_mode2},
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 1300,
-		sizeof(nvm_erase_and_write_rsp), nvm_erase_and_write_rsp},
-};
-
-static struct dsi_cmd_desc	nvm_write_user_cmds[] = {
-	{DTYPE_GEN_WRITE2, 1, 0, 0, 0,
-		sizeof(auto_cmd_refresh), auto_cmd_refresh},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pix_fmt), pix_fmt},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsi_ctl), dsi_ctl},
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(panel_driving), panel_driving},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsp_h_timming), dsp_h_timming},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(src_output), src_output},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
 		sizeof(gate_drv_if_ctl), gate_drv_if_ctl},
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(ltps_if_ctrl), ltps_if_ctrl},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pbctrl_ctl), pbctrl_ctl},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsp_rgb_sw_odr), dsp_rgb_sw_odr},
 	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(ltps_if_ctl), ltps_if_ctl},
@@ -306,10 +225,193 @@ static struct dsi_cmd_desc	nvm_write_user_cmds[] = {
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
 		sizeof(gamma_ctrl_set_b_neg), gamma_ctrl_set_b_neg},
 	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode7), test_mode7},
+#endif
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(panel_driving), panel_driving},
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0,
+		sizeof(mcap_lock), mcap_lock},
 };
-static struct dsi_cmd_desc	nvm_flash_user_cmds[] = {
-	{DTYPE_GEN_LWRITE, 1, 0, 0, 2500,
-		sizeof(nvm_erase_and_write_user), nvm_erase_and_write_user},
+
+static struct dsi_cmd_desc sharp_display_on_cmds[] = {
+	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
+		sizeof(display_on), display_on},
+};
+
+static struct dsi_cmd_desc sharp_display_off_cmds[] = {
+	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
+		sizeof(display_off), display_off},
+	{DTYPE_DCS_WRITE, 1, 0, 0, 120,
+		sizeof(enter_sleep), enter_sleep}
+};
+
+static struct dsi_cmd_desc read_ddb_start_cmds[] = {
+	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(read_ddb_start), read_ddb_start},
+};
+
+#ifdef CONFIG_FB_MSM_RECOVER_PANEL
+static struct dsi_cmd_desc nvm_enter_sleep_cmds[] = {
+	{DTYPE_DCS_WRITE, 1, 0, 0, 80, sizeof(enter_sleep), enter_sleep}
+};
+static struct dsi_cmd_desc nvm_exit_sleep_cmds[] = {
+	{DTYPE_DCS_WRITE, 1, 0, 0, 80, sizeof(exit_sleep), exit_sleep}
+};
+static struct dsi_cmd_desc	nvm_mcap_unlock_cmds[] = {
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(mcap), mcap},
+};
+static struct dsi_cmd_desc	nvm_mcap_lock_cmds[] = {
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(mcap_lock), mcap_lock},
+};
+
+static struct dsi_cmd_desc	nvm_read_e1_cmds[] = {
+	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_read_e1_reg), nvm_read_e1_reg},
+};
+static struct dsi_cmd_desc nvm_read_e6_cmds[] = {
+	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_read_e6_reg), nvm_read_e6_reg},
+};
+static struct dsi_cmd_desc nvm_read_e7_cmds[] = {
+	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_read_e7_reg), nvm_read_e7_reg},
+};
+static struct dsi_cmd_desc nvm_read_de_cmds[] = {
+	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_read_de_reg), nvm_read_de_reg},
+};
+static struct dsi_cmd_desc nvm_read_bf_cmds[] = {
+	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_read_bf_reg), nvm_read_bf_reg},
+};
+static struct dsi_cmd_desc nvm_read_e4_cmds[] = {
+	{DTYPE_GEN_READ, 1, 0, 0, 0, sizeof(nvm_read_e4_reg), nvm_read_e4_reg},
+};
+
+static struct dsi_cmd_desc nvm_erase_finish_cmds[] = {
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode3), test_mode3},
+};
+
+static struct dsi_cmd_desc nvm_write_trim_cmds[] = {
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode1), test_mode1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(nvm_rsp1), nvm_rsp1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dev_code), dev_code},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode2), test_mode2},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 1300, sizeof(nvm_erase_and_write_rsp),
+						nvm_erase_and_write_rsp},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode3), test_mode3},
+};
+
+static struct dsi_cmd_desc nvm_erase_all_cmds[] = {
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode1), test_mode1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(nvm_rsp1), nvm_rsp1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dev_code), dev_code},
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(auto_cmd_refresh),
+							auto_cmd_refresh},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pix_fmt), pix_fmt},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsi_ctl), dsi_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(panel_driving), panel_driving},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsp_h_timming), dsp_h_timming},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(src_output), src_output},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gate_drv_if_ctl),
+							gate_drv_if_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(ltps_if_ctrl), ltps_if_ctrl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pbctrl_ctl), pbctrl_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsp_rgb_sw_odr), dsp_rgb_sw_odr},
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(ltps_if_ctl), ltps_if_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pow_set1), pow_set1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pow_set2), pow_set2},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pow_internal), pow_internal},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(vol_set), vol_set},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(vcomdc_set), vcomdc_set},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(reg_wri_ctl), reg_wri_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(ddb_wri_ctl), ddb_wri_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl), gamma_ctrl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_r_pos),
+							gamma_ctrl_set_r_pos},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_r_neg),
+							gamma_ctrl_set_r_neg},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_g_pos),
+							gamma_ctrl_set_g_pos},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_g_neg),
+							gamma_ctrl_set_g_neg},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_b_pos),
+							gamma_ctrl_set_b_pos},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_b_neg),
+							gamma_ctrl_set_b_neg},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode7), test_mode7},
+	{DTYPE_DCS_WRITE, 1, 0, 0, 200, sizeof(exit_sleep), exit_sleep},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode4), test_mode4},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 1300, sizeof(test_mode5), test_mode5},
+};
+
+static struct dsi_cmd_desc nvm_write_user_cmds[] = {
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(auto_cmd_refresh),
+						auto_cmd_refresh},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pix_fmt), pix_fmt},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsi_ctl), dsi_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(panel_driving), panel_driving},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsp_h_timming), dsp_h_timming},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(src_output), src_output},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gate_drv_if_ctl),
+						gate_drv_if_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(ltps_if_ctrl), ltps_if_ctrl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pbctrl_ctl), pbctrl_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(dsp_rgb_sw_odr), dsp_rgb_sw_odr},
+	{DTYPE_GEN_WRITE2, 1, 0, 0, 0, sizeof(ltps_if_ctl), ltps_if_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pow_set1), pow_set1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pow_set2), pow_set2},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(pow_internal), pow_internal},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(vol_set), vol_set},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(vcomdc_set), vcomdc_set},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(reg_wri_ctl), reg_wri_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(ddb_wri_ctl), ddb_wri_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl), gamma_ctrl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_r_pos),
+						gamma_ctrl_set_r_pos},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_r_neg),
+						gamma_ctrl_set_r_neg},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_g_pos),
+						gamma_ctrl_set_g_pos},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_g_neg),
+						gamma_ctrl_set_g_neg},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_b_pos),
+						gamma_ctrl_set_b_pos},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(gamma_ctrl_set_b_neg),
+						gamma_ctrl_set_b_neg},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0, sizeof(test_mode7), test_mode7},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 2500, sizeof(nvm_erase_and_write_user),
+						nvm_erase_and_write_user},
+};
+
+static struct dsi_nvm_rewrite_ctl dsi_nvrw_ctl = {
+	.nvm_erase_all		= nvm_erase_all_cmds,
+	.nvm_read_e4		= nvm_read_e4_cmds,
+	.nvm_erase_finish	= nvm_erase_finish_cmds,
+	.nvm_read_e1		= nvm_read_e1_cmds,
+	.nvm_write_trim		= nvm_write_trim_cmds,
+	.nvm_write_user		= nvm_write_user_cmds,
+	.nvm_enter_sleep	= nvm_enter_sleep_cmds,
+	.nvm_exit_sleep		= nvm_exit_sleep_cmds,
+	.nvm_mcap_unlock	= nvm_mcap_unlock_cmds,
+	.nvm_mcap_lock		= nvm_mcap_lock_cmds,
+	.nvm_read_e6		= nvm_read_e6_cmds,
+	.nvm_read_e7		= nvm_read_e7_cmds,
+	.nvm_read_de		= nvm_read_de_cmds,
+	.nvm_read_bf		= nvm_read_bf_cmds,
+	.nvm_bf			= dev_code,
+	.nvm_e6			= ddb_wri_ctl,
+	.nvm_e7			= nvm_rsp1,
+	.nvm_de			= vcomdc_set,
+	.nvm_e7_nbr_params	= ARRAY_SIZE(nvm_rsp1) - 1,
+	.nvm_de_nbr_params	= ARRAY_SIZE(vcomdc_set) - 1,
+	.nvm_erase_all_size	= ARRAY_SIZE(nvm_erase_all_cmds),
+	.nvm_read_e4_size	= ARRAY_SIZE(nvm_read_e4_cmds),
+	.nvm_erase_finish_size	= ARRAY_SIZE(nvm_erase_finish_cmds),
+	.nvm_read_e1_size	= ARRAY_SIZE(nvm_read_e1_cmds),
+	.nvm_write_trim_size	= ARRAY_SIZE(nvm_write_trim_cmds),
+	.nvm_write_user_size	= ARRAY_SIZE(nvm_write_user_cmds),
+	.nvm_enter_sleep_size	= ARRAY_SIZE(nvm_enter_sleep_cmds),
+	.nvm_exit_sleep_size	= ARRAY_SIZE(nvm_exit_sleep_cmds),
+	.nvm_mcap_unlock_size	= ARRAY_SIZE(nvm_mcap_unlock_cmds),
+	.nvm_mcap_lock_size	= ARRAY_SIZE(nvm_mcap_lock_cmds),
+	.nvm_restore_e7		= true,
+	.nvm_restore_de		= true,
+	.nvm_de_valid_param_start	= 2,
+	.nvm_de_valid_param_end		= 3,
 };
 #endif
 
@@ -390,41 +492,14 @@ static struct msm_panel_info *get_panel_info(void)
 
 static struct dsi_controller dsi_video_controller_panel = {
 	.get_panel_info = get_panel_info,
-	.display_init = display_init_cmds,
-	.display_on = display_on_cmds,
-	.display_off = display_off_cmds,
-	.read_id = read_ddb_cmds,
+	.display_init_cmds = sharp_display_init_cmds,
+	.display_on_cmds = sharp_display_on_cmds,
+	.display_off_cmds = sharp_display_off_cmds,
+	.read_id_cmds = read_ddb_start_cmds,
+	.display_init_cmds_size = ARRAY_SIZE(sharp_display_init_cmds),
+	.display_on_cmds_size = ARRAY_SIZE(sharp_display_on_cmds),
+	.display_off_cmds_size = ARRAY_SIZE(sharp_display_off_cmds),
 };
-
-#ifdef CONFIG_FB_MSM_RECOVER_PANEL
-struct dsi_nvm_rewrite_ctl dsi_nvrw_ctl = {
-	.nvm_disp_off		= nvm_disp_off_cmds,
-	.nvm_mcap		= nvm_mcap_cmds,
-	.nvm_mcap_lock		= nvm_mcap_lock_cmds,
-	.nvm_open		= nvm_open_cmds,
-	.nvm_close		= nvm_close_cmds,
-	.nvm_status		= nvm_status_cmds,
-	.nvm_erase		= nvm_erase_cmds,
-	.nvm_erase_res		= nvm_erase_res_cmds,
-	.nvm_read		= nvm_read_cmds,
-	.nvm_write_rsp		= nvm_write_rsp_cmds,
-	.nvm_flash_rsp		= nvm_flash_rsp_cmds,
-	.nvm_write_user		= nvm_write_user_cmds,
-	.nvm_flash_user		= nvm_flash_user_cmds,
-
-	.nvm_disp_off_size	= ARRAY_SIZE(nvm_disp_off_cmds),
-	.nvm_mcap_size		= ARRAY_SIZE(nvm_mcap_cmds),
-	.nvm_mcap_lock_size	= ARRAY_SIZE(nvm_mcap_lock_cmds),
-	.nvm_open_size		= ARRAY_SIZE(nvm_open_cmds),
-	.nvm_close_size		= ARRAY_SIZE(nvm_close_cmds),
-	.nvm_erase_size		= ARRAY_SIZE(nvm_erase_cmds),
-	.nvm_read_size		= ARRAY_SIZE(nvm_read_cmds),
-	.nvm_write_rsp_size	= ARRAY_SIZE(nvm_write_rsp_cmds),
-	.nvm_flash_rsp_size	= ARRAY_SIZE(nvm_flash_rsp_cmds),
-	.nvm_write_user_size	= ARRAY_SIZE(nvm_write_user_cmds),
-	.nvm_flash_user_size	= ARRAY_SIZE(nvm_flash_user_cmds),
-};
-#endif
 
 static char ddb_val_1a[] = {
 	0x12, 0x66, 0x03, 0x22, 0x1a, 0x01, 0x00, 0xff
@@ -438,7 +513,7 @@ static char default_ddb_val[] = {
 	0x12, 0x66, 0x03, 0x22
 };
 
-const struct panel sharp_ls046k3sy01_panel_id_1a = {
+const struct panel_id sharp_ls046k3sy01_panel_id_1a = {
 	.name = "mipi_video_sharp_wxga_ls046k3sy01_id_1a",
 	.pctrl = &dsi_video_controller_panel,
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
@@ -448,11 +523,9 @@ const struct panel sharp_ls046k3sy01_panel_id_1a = {
 	.id_num = ARRAY_SIZE(ddb_val_1a),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls046k3sy01",
-	.panel_rev = "1a",
 };
 
-const struct panel sharp_ls046k3sy01_panel_id = {
+const struct panel_id sharp_ls046k3sy01_panel_id = {
 	.name = "mipi_video_sharp_wxga_ls046k3sy01",
 	.pctrl = &dsi_video_controller_panel,
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
@@ -462,11 +535,9 @@ const struct panel sharp_ls046k3sy01_panel_id = {
 	.id_num = ARRAY_SIZE(ddb_val),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls046k3sy01",
-	.panel_rev = "generic",
 };
 
-const struct panel sharp_ls046k3sy01_panel_default = {
+const struct panel_id sharp_ls046k3sy01_panel_default = {
 	.name = "mipi_sharp_panel",
 	.pctrl = &dsi_video_controller_panel,
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
@@ -476,7 +547,4 @@ const struct panel sharp_ls046k3sy01_panel_default = {
 	.id_num = ARRAY_SIZE(default_ddb_val),
 	.width = 53,
 	.height = 95,
-	.panel_id = "ls046k3sy01",
-	.panel_rev = "default",
 };
-

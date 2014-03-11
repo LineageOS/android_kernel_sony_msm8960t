@@ -1,3 +1,0 @@
-# fetches the kernel defconfig
-# Mac OS-X Version
-ARCH=arm CROSS_COMPILE=/Volumes/android/cm10.2/prebuilts/gcc/darwin-x86/arm/arm-eabi-4.6/bin/arm-eabi- make viskan_huashan_defconfig

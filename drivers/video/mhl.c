@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Sony Ericsson Mobile Communications AB.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  * Copyright (C) 2011 Silicon Image Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -26,17 +26,22 @@
 #include <linux/mhl.h>
 #include <linux/mhl_defs.h>
 
+#ifdef CONFIG_MHL_OSD_NAME
+#include "msm/mdp.h"
+#include "msm/external_common.h"
+#endif /* CONFIG_MHL_OSD_NAME */
+
 #define PRINT_DEVCAP
 
 #ifdef CONFIG_MHL_RAP
-#define RAP_CONTENT_ON "RAP_CONTENT_ON"
-
 /* RAPK_WAIT(TRAP_WAIT) 1000ms */
 #define RAPK_WAIT_TIME		(jiffies + HZ)
 #define RAPK_RETRY_TIME		(jiffies + HZ/2)
 #define RAP_SEND_RETRY_MAX	2
+#define SEND_POWERKEY_TIME	(jiffies + HZ/3)
 #endif /* CONFIG_MHL_RAP */
 
+#define MHL_KEYCODE_OFFSET	0x40
 /*
  * mhl.c - MHL control abustruction provides following feature
  * - Userspace interface
@@ -53,10 +58,17 @@ struct workqueue_struct *msc_command_workqueue;
 #ifdef CONFIG_MHL_RAP
 static DEFINE_MUTEX(rap_command_queue_mutex);
 struct workqueue_struct *rap_command_workqueue;
+static int mhl_rap_send_msc_msg(struct mhl_device *mhl_dev, u8 sub_cmd,
+	u8 cmd_data);
+static void mhl_handle_input(struct mhl_device *mhl_dev, u8 key_code);
 #endif /* CONFIG_MHL_RAP */
 
 static DEFINE_MUTEX(usb_online_mutex);
 struct workqueue_struct *usb_online_workqueue;
+
+#ifdef CONFIG_MHL_OSD_NAME
+static struct workqueue_struct *scratchpad_workqueue;
+#endif /* CONFIG_MHL_OSD_NAME */
 
 static void (*notify_usb_online)(int online);
 
@@ -130,6 +142,7 @@ int mhl_notify_unplugged(struct mhl_device *mhl_dev)
 	mhl_dev->hpd_state = 0;
 	mhl_dev->tmds_state = FALSE;
 	mhl_dev->devcap_state = 0;
+	mhl_dev->key_release_supported = 0;
 	memset(&mhl_dev->state, 0, sizeof(struct mhl_state));
 
 	/* callback usb driver if callback registered */
@@ -153,6 +166,35 @@ static int mhl_check_sink_version(struct mhl_device *mhl_dev)
 		ret_val = 1;
 
 	return ret_val;
+}
+
+static void mhl_check_sink_devcat_plim(struct mhl_device *mhl_dev)
+{
+	int devcat = mhl_dev->state.peer_devcap[DEVCAP_OFFSET_DEV_CAT];
+	int plim0 = devcat & MHL_DEV_CATEGORY_PLIM0_BIT;
+	int plim1 = devcat & MHL_DEV_CATEGORY_PLIM1_BIT;
+	int mhl_version = mhl_dev->state.peer_devcap[DEVCAP_OFFSET_MHL_VERSION];
+
+	/* Default value. Note that we use 700 mA instead of 500 mA here. */
+	int charging_current = 700;
+
+	if (mhl_version >= 0x20) {
+		/* Set charging current depending on the sink. */
+		if (!plim1 && !plim0) {
+			/* Use default current. */
+		} else if (!plim1 && plim0) {
+			charging_current = 900;
+		} else if (plim1 && !plim0) {
+			/* This can be 1500 mA according to the MHL 2.0 spec,
+			 * but we have no way to test that and therefore won't
+			 * set it any higher than 900 mA at this point. */
+			charging_current = 900;
+		} else {
+			/* Unknown configuration. Use default current. */
+		}
+	}
+
+	mhl_dev->ops->charging_control(TRUE, charging_current);
 }
 
 int mhl_notify_online(struct mhl_device *mhl_dev)
@@ -220,22 +262,6 @@ int mhl_notify_offline(struct mhl_device *mhl_dev)
 	return 0;
 }
 EXPORT_SYMBOL(mhl_notify_offline);
-
-#ifdef CONFIG_MHL_RAP
-static int mhl_notify_rap_content_on(struct mhl_device *mhl_dev)
-{
-	char *envp[2];
-
-	if (!mhl_dev)
-		return -EFAULT;
-
-	envp[0] = RAP_CONTENT_ON;
-	envp[1] = NULL;
-	kobject_uevent_env(&mhl_dev->dev.kobj, KOBJ_CHANGE, envp);
-
-	return 0;
-}
-#endif /* CONFIG_MHL_RAP */
 
 int mhl_notify_hpd(struct mhl_device *mhl_dev, int state)
 {
@@ -314,8 +340,7 @@ int mhl_msc_command_done(struct mhl_device *mhl_dev,
 		case MHL_DEV_CATEGORY_OFFSET:
 			if (req->retval & MHL_DEV_CATEGORY_POW_BIT) {
 				if (mhl_dev->ops->charging_control)
-					mhl_dev->ops->charging_control
-						(TRUE, 700);
+					mhl_check_sink_devcat_plim(mhl_dev);
 			} else {
 				if (mhl_dev->ops->charging_control)
 					mhl_dev->ops->charging_control
@@ -325,8 +350,8 @@ int mhl_msc_command_done(struct mhl_device *mhl_dev,
 			break;
 #ifdef CONFIG_MHL_RAP
 		case DEVCAP_OFFSET_FEATURE_FLAG:
-			if (req->retval & MHL_FEATURE_RAP_SUPPORT)
-				mhl_notify_rap_content_on(mhl_dev);
+			mhl_rap_send_msc_msg(mhl_dev, MHL_MSC_MSG_RAP,
+				MHL_RAP_CONTENT_ON);
 			break;
 #endif /* CONFIG_MHL_RAP */
 		case DEVCAP_OFFSET_MHL_VERSION:
@@ -377,11 +402,11 @@ static void mhl_msc_command_work(struct work_struct *work)
 		}
 		if (ret == -EAGAIN)
 			pr_err("%s: send_msc_command retry out!\n", __func__);
-
+#ifdef CONFIG_MHL_RAP
 		if (event->msc_command_queue.payload.data[0] ==
 			MHL_MSC_MSG_RAP)
 			mod_timer(&mhl_dev->rap_send_timer, RAPK_WAIT_TIME);
-
+#endif /* CONFIG_MHL_RAP */
 		vfree(event);
 
 		mutex_lock(&msc_command_queue_mutex);
@@ -535,19 +560,48 @@ static void mhl_rap_send_retry_timer(unsigned long data)
 	queue_work(rap_command_workqueue, &mhl_dev->rap_retry_work);
 }
 
+static void __mhl_input_send_powerkey(struct mhl_device *mhl_dev)
+{
+	int key;
+
+	if (!mhl_dev->input)
+		return;
+
+	dev_info(&mhl_dev->dev, "send powerkey\n");
+
+	/*
+	 * fake Vendor_Specific key event to suspend phone, sending directly
+	 * to the input device to avoid conflicts with mhl_handle_input logic
+	 * in future
+	 */
+	key = 0x7E + MHL_KEYCODE_OFFSET;
+	input_report_key(mhl_dev->input, key, TRUE);
+	input_report_key(mhl_dev->input, key, FALSE);
+	input_sync(mhl_dev->input);
+}
+
+static void mhl_rap_powerkey_timer(unsigned long data)
+{
+	struct mhl_device *mhl_dev = (struct mhl_device *)data;
+	if (!mhl_dev)
+		return;
+
+	__mhl_input_send_powerkey(mhl_dev);
+}
+
 static void mhl_init_rap_timers(struct mhl_device *mhl_dev)
 {
 	init_timer(&mhl_dev->rap_send_timer);
 	mhl_dev->rap_send_timer.function = mhl_rap_send_timer;
 	mhl_dev->rap_send_timer.data = (unsigned long)mhl_dev;
-	mhl_dev->rap_send_timer.expires = 0xffffffffL;
-	add_timer(&mhl_dev->rap_send_timer);
 
 	init_timer(&mhl_dev->rap_retry_timer);
 	mhl_dev->rap_retry_timer.function = mhl_rap_send_retry_timer;
 	mhl_dev->rap_retry_timer.data = (unsigned long)mhl_dev;
-	mhl_dev->rap_retry_timer.expires = 0xffffffffL;
-	add_timer(&mhl_dev->rap_retry_timer);
+
+	init_timer(&mhl_dev->rap_powerkey_timer);
+	mhl_dev->rap_powerkey_timer.function = mhl_rap_powerkey_timer;
+	mhl_dev->rap_powerkey_timer.data = (unsigned long)mhl_dev;
 }
 #endif /* CONFIG_MHL_RAP */
 /*
@@ -566,22 +620,63 @@ int mhl_msc_send_write_stat(struct mhl_device *mhl_dev, u8 offset, u8 value)
 EXPORT_SYMBOL(mhl_msc_send_write_stat);
 
 #ifdef CONFIG_MHL_OSD_NAME
+static void mhl_scratchpad_send_work(struct work_struct *work)
+{
+	struct mhl_device *mhl_dev =
+		container_of(work, struct mhl_device, scratchpad_work);
+
+	mhl_msc_request_write_burst(
+		mhl_dev, 0x40,
+		(u8 *)&mhl_dev->scratchpad_send_data,
+		MHL_SCRATCHPAD_SIZE);
+
+#ifdef DEBUG
+	{
+		char tmpbuf[128];
+		int ret, i;
+		ret = snprintf(tmpbuf, sizeof(tmpbuf), "SCPD=");
+		for (i = 0; i < sizeof(mhl_dev->scratchpad_send_data); i++)
+			ret += snprintf(
+				tmpbuf + ret, sizeof(tmpbuf)-ret, "%02x",
+				*((u8 *)(&mhl_dev->scratchpad_send_data) + i));
+		pr_info("RAW SCPD response=%s\n", tmpbuf);
+	}
+#endif
+}
+
+static void mhl_set_osd_name_send(struct mhl_device *mhl_dev, const char *name)
+{
+	struct mhl_osd_msg *response = &mhl_dev->scratchpad_send_data;
+	const u16 adopter_id = htons(
+		(mhl_dev->state.peer_devcap[MHL_DEV_ADOPTER_ID_H_OFFSET]<<8) +
+		mhl_dev->state.peer_devcap[MHL_DEV_ADOPTER_ID_L_OFFSET]);
+
+	memset(response, 0, sizeof(struct mhl_osd_msg));
+	response->adopter_id = adopter_id;
+	response->command_id = MHL_SCPD_SET_OSD_NAME;
+	strlcpy(response->name, name, sizeof(response->name));
+	queue_work(scratchpad_workqueue, &mhl_dev->scratchpad_work);
+}
+
 int mhl_notify_scpd_recv(struct mhl_device *mhl_dev, const char *buf)
 {
-	char *envp[2];
-	ssize_t ret = 0;
-	int i;
+	struct mhl_osd_msg *data = (struct mhl_osd_msg *)buf;
+	pr_debug("SCPD received: adopter_id=0x%x, command_id=0x%x\n",
+		 ntohs(data->adopter_id), data->command_id);
 
-	envp[0] = kmalloc(128, GFP_KERNEL);
-	if (!envp[0])
-		return -ENOMEM;
-	ret = snprintf(envp[0], 128, "SCPD=");
-	for (i = 0; i < MHL_SCRATCHPAD_SIZE; i++)
-		ret += snprintf(envp[0]+ret, 128-ret, "%02x", buf[i]);
-	envp[1] = NULL;
-	pr_info("env[0] : %s", envp[0]);
-	kobject_uevent_env(&mhl_dev->dev.kobj, KOBJ_CHANGE, envp);
-	kfree(envp[0]);
+	if (!external_common_state) {
+		pr_err("%s: external_common_state is null!\n", __func__);
+		return -EFAULT;
+	}
+	if (ntohs(data->adopter_id) == MHL_ADOPTER_ID_SOMC &&
+		data->command_id == MHL_SCPD_GIVE_OSD_NAME) {
+		/* Sony TV asks for phone name */
+		mhl_set_osd_name_send(mhl_dev,
+			external_common_state->spd_product_description);
+	} else {
+		pr_debug("%s: Skipped adopter_id=0x%x, command_id=0x%x\n",
+			 __func__, ntohs(data->adopter_id), data->command_id);
+	}
 	return 0;
 }
 EXPORT_SYMBOL(mhl_notify_scpd_recv);
@@ -622,7 +717,9 @@ int mhl_msc_recv_write_stat(struct mhl_device *mhl_dev, u8 offset, u8 value)
 					MHL_STATUS_REG_LINK_MODE,
 					mhl_dev->state.peer_status[1]);
 #ifdef CONFIG_MHL_RAP
-				mhl_notify_rap_content_on(mhl_dev);
+				mhl_rap_send_msc_msg(mhl_dev,
+					MHL_MSC_MSG_RAP,
+					MHL_RAP_CONTENT_ON);
 #endif /* CONFIG_MHL_RAP */
 			} else {
 				mhl_dev->state.peer_status[1]
@@ -750,9 +847,12 @@ static void mhl_print_devcap(struct mhl_device *mhl_dev, int offset)
 	switch (offset) {
 	case DEVCAP_OFFSET_DEV_CAT:
 		reg = mhl_dev->state.peer_devcap[offset];
-		pr_info("DCAP: %02X %s: %02X DEV_TYPE=%X POW=%s\n",
+		pr_info("DCAP: %02X %s: %02X DEV_TYPE=%X POW=%s PLIM0=%s PLIM1=%s\n",
 			offset, devcap_reg_name[offset], reg,
-			reg & 0x0F, (reg & 0x10) ? "y" : "n");
+			reg & 0x0F,
+			(reg & MHL_DEV_CATEGORY_POW_BIT) ? "y" : "n",
+			(reg & MHL_DEV_CATEGORY_PLIM0_BIT) ? "y" : "n",
+			(reg & MHL_DEV_CATEGORY_PLIM1_BIT) ? "y" : "n");
 		break;
 	case DEVCAP_OFFSET_FEATURE_FLAG:
 		reg = mhl_dev->state.peer_devcap[offset];
@@ -856,28 +956,23 @@ static int mhl_prior_send_msc_command_msc_msg(
 	return mhl_queue_msc_command(mhl_dev, &req, MSC_PRIOR_SEND);
 }
 
-static int mhl_notify_rcp_recv(struct mhl_device *mhl_dev, u8 key_code)
-{
-	char *envp[2];
-	if (!mhl_dev)
-		return -EFAULT;
-	envp[0] = kmalloc(128, GFP_KERNEL);
-	if (!envp[0])
-		return -ENOMEM;
-	snprintf(envp[0], 128, "RCP_KEYCODE=%x", key_code);
-	envp[1] = NULL;
-	kobject_uevent_env(&mhl_dev->dev.kobj, KOBJ_CHANGE, envp);
-	kfree(envp[0]);
-	return 0;
-}
-
 #ifdef CONFIG_MHL_RAP
 static int mhl_rap_send_msc_msg(
 	struct mhl_device *mhl_dev, u8 sub_cmd, u8 cmd_data)
 {
 	struct msc_command_struct req;
+	u8 peer_features;
+
 	if (!mhl_dev)
 		return -EFAULT;
+
+	peer_features =
+		mhl_dev->state.peer_devcap[MHL_DEV_FEATURE_FLAG_OFFSET];
+	if ((peer_features & MHL_FEATURE_RAP_SUPPORT) == 0 ||
+		!mhl_dev->full_operation || mhl_dev->suspended ||
+		mhl_dev->mhl_online != MHL_ONLINE)
+		return -ENXIO;
+
 	req.command = MHL_MSC_MSG;
 	req.payload.data[0] = sub_cmd;
 	req.payload.data[1] = cmd_data;
@@ -885,55 +980,74 @@ static int mhl_rap_send_msc_msg(
 }
 #endif /* CONFIG_MHL_RAP */
 
-/* supported RCP key code */
-static const u8 support_rcp_key_code_tbl[] = {
-	1, 1, 1, 1, 1, 0, 0, 0,		/* 0x00~0x07 */
-	0, 1, 1, 0, 0, 1, 0, 0,		/* 0x08~0x0f */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x10~0x17 */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x18~0x1f */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x20~0x27 */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x28~0x2f */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x30~0x37 */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x38~0x3f */
-	0, 0, 0, 0, 1, 1, 1, 0,		/* 0x40~0x47 */
-	1, 1, 0, 1, 1, 0, 0, 0,		/* 0x48~0x4f */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x50~0x57 */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x58~0x5f */
-	1, 1, 0, 0, 1, 0, 0, 0,		/* 0x60~0x67 */
-	0, 0, 0, 0, 0, 0, 0, 0,		/* 0x68~0x6f */
-	0, 1, 1, 1, 1, 0, 0, 0,		/* 0x70~0x77 */
-	0, 0, 0, 0, 0, 0, 0, 0		/* 0x78~0x7f */
-};
+static void mhl_handle_input(struct mhl_device *mhl_dev, u8 key_code)
+{
+	int input_key_code = (key_code & 0x7F) + MHL_KEYCODE_OFFSET;
+	int key_pressed = (key_code & 0x80) == 0 ? 1 : 0;
+	pr_debug("%s: input_key_code = 0x%x, key_pressed=%d, " \
+		 "key_code = 0x%x, mouse_enabled=%d\n",
+		 __func__, input_key_code, key_pressed,
+		 key_code, mhl_dev->mouse_enabled);
+
+	if (mhl_dev->mouse_enabled) {
+		switch (key_code & 0x7F) {
+		case 0x00: /* CENTER */
+			input_report_key(mhl_dev->input, BTN_LEFT, key_pressed);
+			break;
+		case 0x01: /* UP */
+			input_report_rel(mhl_dev->input, REL_Y,
+					-mhl_dev->mouse_move_distance_dy
+					* key_pressed);
+			break;
+		case 0x02: /* DOWN */
+			input_report_rel(mhl_dev->input, REL_Y,
+					mhl_dev->mouse_move_distance_dy
+					* key_pressed);
+			break;
+		case 0x03: /* LEFT */
+			input_report_rel(mhl_dev->input, REL_X,
+					-mhl_dev->mouse_move_distance_dx
+					* key_pressed);
+			break;
+		case 0x04: /* RIGHT */
+			input_report_rel(mhl_dev->input, REL_X,
+					mhl_dev->mouse_move_distance_dx
+					* key_pressed);
+			break;
+		default:
+			input_report_key(mhl_dev->input, input_key_code,
+					 key_pressed);
+			break;
+		}
+	} else {
+		input_report_key(mhl_dev->input, input_key_code, key_pressed);
+	}
+	input_sync(mhl_dev->input);
+}
 
 static int mhl_rcp_recv(struct mhl_device *mhl_dev, u8 key_code)
 {
 	int rc;
-	if (support_rcp_key_code_tbl[(key_code & 0x7f)]) {
-		/* notify userspace */
-		mhl_notify_rcp_recv(mhl_dev, key_code);
-		/* prior send rcpk */
-		rc = mhl_prior_send_msc_command_msc_msg(
-			mhl_dev,
-			MHL_MSC_MSG_RCPK,
-			key_code);
-	} else {
-		/* prior send rcpe */
-		rc = mhl_prior_send_msc_command_msc_msg(
-			mhl_dev,
-			MHL_MSC_MSG_RCPE,
-			MHL_RCPE_UNSUPPORTED_KEY_CODE);
-		if (rc)
-			return rc;
-		/* send rcpk after rcpe send */
-		rc = mhl_msc_send_msc_msg(
-			mhl_dev,
-			MHL_MSC_MSG_RCPK,
-			key_code);
+
+	rc = mhl_prior_send_msc_command_msc_msg(
+		mhl_dev,
+		MHL_MSC_MSG_RCPK,
+		key_code);
+
+	if (mhl_dev->full_operation && !mhl_dev->suspended) {
+		if (key_code & 0x80)
+			mhl_dev->key_release_supported = 1;
+		if (mhl_dev->input) {
+			mhl_handle_input(mhl_dev, key_code);
+			/* Fake key release */
+			if (!mhl_dev->key_release_supported)
+				mhl_handle_input(mhl_dev, key_code | 0x80);
+		}
 	}
+
 	return rc;
 }
 
-#ifdef CONFIG_MHL_RAP
 static int mhl_notify_rap_recv(struct mhl_device *mhl_dev, u8 action_code)
 {
 	char *envp[2];
@@ -946,7 +1060,6 @@ static int mhl_notify_rap_recv(struct mhl_device *mhl_dev, u8 action_code)
 	kfree(envp[0]);
 	return 0;
 }
-#endif /* CONFIG_MHL_RAP */
 
 static int mhl_rap_action(struct mhl_device *mhl_dev, u8 action_code)
 {
@@ -954,16 +1067,30 @@ static int mhl_rap_action(struct mhl_device *mhl_dev, u8 action_code)
 	switch (action_code) {
 	case MHL_RAP_CONTENT_ON:
 		if (!mhl_dev->tmds_state) {
+			mutex_lock(&mhl_dev->ops_mutex);
 			mhl_dev->ops->tmds_control(TRUE);
+			mutex_unlock(&mhl_dev->ops_mutex);
 			/* notify userspace */
 			mhl_notify_rap_recv(mhl_dev, action_code);
 		}
+		if (mhl_dev->suspended) {
+			mhl_dev->suspended = 0;
+			__mhl_input_send_powerkey(mhl_dev);
+		}
 		break;
 	case MHL_RAP_CONTENT_OFF:
-		if (mhl_dev->tmds_state) {
+		if (mhl_dev->tmds_state && !mhl_dev->suspended) {
+			mhl_dev->ops->hpd_control(FALSE);
 			mhl_dev->ops->tmds_control(FALSE);
+			mhl_dev->tmds_state = FALSE;
 			/* notify userspace */
 			mhl_notify_rap_recv(mhl_dev, action_code);
+			/* NACK any RAP call until we resumed */
+			mhl_dev->suspended = 1;
+			/* reserve power key transmission */
+			dev_info(&mhl_dev->dev, "set powerkey\n");
+			mod_timer(&mhl_dev->rap_powerkey_timer,
+						SEND_POWERKEY_TIME);
 		}
 		break;
 	default:
@@ -973,14 +1100,10 @@ static int mhl_rap_action(struct mhl_device *mhl_dev, u8 action_code)
 #else
 	switch (action_code) {
 	case MHL_RAP_CONTENT_ON:
-		mutex_lock(&mhl_dev->ops_mutex);
 		mhl_dev->ops->tmds_control(TRUE);
-		mutex_unlock(&mhl_dev->ops_mutex);
 		break;
 	case MHL_RAP_CONTENT_OFF:
-		mutex_lock(&mhl_dev->ops_mutex);
 		mhl_dev->ops->tmds_control(FALSE);
-		mutex_unlock(&mhl_dev->ops_mutex);
 		break;
 	default:
 		break;
@@ -988,22 +1111,6 @@ static int mhl_rap_action(struct mhl_device *mhl_dev, u8 action_code)
 	return 0;
 #endif /* CONFIG_MHL_RAP */
 }
-
-#ifdef CONFIG_MHL_RAP
-#else
-static int mhl_notify_rap_recv(struct mhl_device *mhl_dev, u8 action_code)
-{
-	char *envp[2];
-	envp[0] = kmalloc(128, GFP_KERNEL);
-	if (!envp[0])
-		return -ENOMEM;
-	snprintf(envp[0], 128, "RAP_ACTIONCODE=%x", action_code);
-	envp[1] = NULL;
-	kobject_uevent_env(&mhl_dev->dev.kobj, KOBJ_CHANGE, envp);
-	kfree(envp[0]);
-	return 0;
-}
-#endif /* CONFIG_MHL_RAP */
 
 static int mhl_rap_recv(struct mhl_device *mhl_dev, u8 action_code)
 {
@@ -1013,7 +1120,9 @@ static int mhl_rap_recv(struct mhl_device *mhl_dev, u8 action_code)
 	case MHL_RAP_POLL:
 	case MHL_RAP_CONTENT_ON:
 	case MHL_RAP_CONTENT_OFF:
-		if (mhl_dev->full_operation) {
+		if (mhl_dev->full_operation &&
+			(action_code == MHL_RAP_CONTENT_ON ||
+				!mhl_dev->suspended)) {
 			mhl_rap_action(mhl_dev, action_code);
 			error_code = MHL_RAPK_NO_ERROR;
 #ifdef CONFIG_MHL_RAP
@@ -1094,7 +1203,6 @@ static ssize_t mhl_store_rcp(struct device *dev,
 	u8 peer_features =
 		mhl_dev->state.peer_devcap[MHL_DEV_FEATURE_FLAG_OFFSET];
 	u8 key_code;
-	ssize_t ret = strnlen(buf, PAGE_SIZE);
 
 	key_code = (u8) atoi(buf);
 	key_code &= 0x7f;
@@ -1107,7 +1215,7 @@ static ssize_t mhl_store_rcp(struct device *dev,
 	else
 		return -EFAULT;
 
-	return ret;
+	return count;
 }
 
 static ssize_t mhl_store_rap(struct device *dev,
@@ -1117,7 +1225,6 @@ static ssize_t mhl_store_rap(struct device *dev,
 	u8 peer_features =
 		mhl_dev->state.peer_devcap[MHL_DEV_FEATURE_FLAG_OFFSET];
 	u8 action_code;
-	ssize_t ret = strnlen(buf, PAGE_SIZE);
 
 	action_code = (u8) atoi(buf);
 
@@ -1126,7 +1233,7 @@ static ssize_t mhl_store_rap(struct device *dev,
 		case MHL_RAP_CONTENT_ON:
 		case MHL_RAP_CONTENT_OFF:
 #ifdef CONFIG_MHL_RAP
-			ret = mhl_rap_send_msc_msg(
+			mhl_rap_send_msc_msg(
 				mhl_dev,
 				MHL_MSC_MSG_RAP,
 				action_code);
@@ -1143,7 +1250,7 @@ static ssize_t mhl_store_rap(struct device *dev,
 	} else
 		return -EFAULT;
 
-	return ret;
+	return count;
 }
 
 /*
@@ -1266,19 +1373,11 @@ static void mhl_usb_online_work(struct work_struct *work)
 
 int mhl_register_callback(const char *name, void (*callback)(int on))
 {
-	struct mhl_device *mhl_dev;
 	int ret = 0;
 
-	mhl_dev = mhl_get_dev(name);
-
-	if (!notify_usb_online) {
+	if (!notify_usb_online)
 		notify_usb_online = callback;
-		if (mhl_dev)
-			notify_usb_online
-				(!!(mhl_dev->mhl_online & MHL_PLUGGED));
-		else
-			notify_usb_online(0);
-	} else {
+	else {
 		pr_err("%s: callback is already registered!\n", __func__);
 		ret = -EFAULT;
 	}
@@ -1335,6 +1434,16 @@ int mhl_full_operation(const char *name, int enable)
 	}
 	mhl_dev->full_operation = enable;
 
+#ifdef CONFIG_MHL_RAP
+	/* If MHL cable is connected before full_operation is called
+	 * by HDMI driver during the phone start up, CONTENT_ON won't
+	 * be sent in PATH_EN processing. Do it here to avoid Bravia
+	 * Sync feature issue.
+	 */
+	mhl_rap_send_msc_msg(mhl_dev,
+		MHL_MSC_MSG_RAP, MHL_RAP_CONTENT_ON);
+#endif /* CONFIG_MHL_RAP */
+
 	return 0;
 }
 EXPORT_SYMBOL(mhl_full_operation);
@@ -1365,28 +1474,37 @@ static ssize_t mhl_show_device_id(struct device *dev,
 				[MHL_DEV_DEVICE_ID_L_OFFSET]);
 }
 
-#ifdef CONFIG_MHL_OSD_NAME
-static ssize_t mhl_store_scpd(struct device *dev,
+static ssize_t mhl_show_mouse_mode(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct mhl_device *mhl_dev = to_mhl_device(dev);
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+			mhl_dev->mouse_enabled);
+}
+
+static ssize_t mhl_store_mouse_mode(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct mhl_device *mhl_dev = to_mhl_device(dev);
-	u8 peer_features =
-		mhl_dev->state.peer_devcap[MHL_DEV_FEATURE_FLAG_OFFSET];
-	ssize_t ret = strnlen(buf, PAGE_SIZE);
-	static char data[MHL_SCRATCHPAD_SIZE];
-
-	strlcpy(data, buf, MHL_SCRATCHPAD_SIZE);
-	if (peer_features & MHL_FEATURE_SP_SUPPORT)
-		mhl_msc_request_write_burst(
-			mhl_dev,
-			0x40,
-			data,
-			MHL_SCRATCHPAD_SIZE);
-	else
-		return -EFAULT;
-	return ret;
+	sscanf(buf, "%d", &mhl_dev->mouse_enabled);
+	return count;
 }
-#endif /* CONFIG_MHL_OSD_NAME */
+
+static ssize_t mhl_store_mouse_move_distance_dx(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct mhl_device *mhl_dev = to_mhl_device(dev);
+	sscanf(buf, "%d", &mhl_dev->mouse_move_distance_dx);
+	return count;
+}
+
+static ssize_t mhl_store_mouse_move_distance_dy(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct mhl_device *mhl_dev = to_mhl_device(dev);
+	sscanf(buf, "%d", &mhl_dev->mouse_move_distance_dy);
+	return count;
+}
 
 /********************************
  * MHL class driver
@@ -1395,26 +1513,98 @@ static ssize_t mhl_store_scpd(struct device *dev,
 static void mhl_device_release(struct device *dev)
 {
 	struct mhl_device *mhl_dev = to_mhl_device(dev);
+	unregister_early_suspend(&mhl_dev->early_suspend);
 	kfree(mhl_dev);
 }
+
+static void mhl_content_off_and_suspend(struct mhl_device *mhl_dev)
+{
+#ifdef CONFIG_MHL_RAP
+	/* send CONTENT OFF for capable devices */
+	mhl_rap_send_msc_msg(mhl_dev, MHL_MSC_MSG_RAP, MHL_RAP_CONTENT_OFF);
+
+	/* NACK any RAP call until we resumed */
+	mhl_dev->suspended = 1;
+#endif
+}
+
+void mhl_device_shutdown(struct mhl_device *mhl_dev)
+{
+	mhl_content_off_and_suspend(mhl_dev);
+}
+EXPORT_SYMBOL(mhl_device_shutdown);
+
+#if defined(CONFIG_HAS_EARLYSUSPEND) && defined(CONFIG_MHL_RAP)
+static void mhl_early_suspend(struct early_suspend *handler)
+{
+	struct mhl_device *mhl_dev =
+		container_of(handler, struct mhl_device, early_suspend);
+
+	dev_info(&mhl_dev->dev, "early suspend\n");
+
+	/* cancel power key transmission */
+	del_timer(&mhl_dev->rap_powerkey_timer);
+
+	if (mhl_dev->mhl_online != MHL_ONLINE || !mhl_dev->tmds_state
+			|| !mhl_dev->full_operation) {
+		mhl_dev->suspended = 1;
+		return;
+	}
+
+	mhl_dev->ops->hpd_control(FALSE);
+	mhl_dev->ops->tmds_control(FALSE);
+	mhl_dev->tmds_state = FALSE;
+
+	mhl_content_off_and_suspend(mhl_dev);
+}
+
+static void mhl_early_resume(struct early_suspend *handler)
+{
+	struct mhl_device *mhl_dev =
+		container_of(handler, struct mhl_device, early_suspend);
+
+	dev_info(&mhl_dev->dev, "early resume\n");
+
+	mhl_dev->suspended = 0;
+
+	/* cancel power key transmission */
+	del_timer(&mhl_dev->rap_powerkey_timer);
+
+	if (mhl_dev->mhl_online != MHL_ONLINE || !mhl_dev->full_operation)
+		return;
+
+	mhl_dev->ops->tmds_control(TRUE);
+	mhl_dev->tmds_state = TRUE;
+	mhl_dev->ops->hpd_control(TRUE);
+
+	mhl_rap_send_msc_msg(mhl_dev, MHL_MSC_MSG_RAP, MHL_RAP_CONTENT_ON);
+}
+#endif
 
 struct mhl_device *mhl_device_register(const char *name,
 	struct device *parent, void *drvdata, const struct mhl_ops *ops)
 {
 	struct mhl_device *mhl_dev;
 	int rc;
+	int i;
+	struct input_dev *input;
 
-	if (!name)
-		return ERR_PTR(-EFAULT);
+	if (!name) {
+		rc = -EFAULT;
+		goto err;
+	}
 
 	if (!ops || !ops->discovery_result_get ||
-		!ops->send_msc_command || !ops->tmds_control)
-		return ERR_PTR(-EFAULT);
+		!ops->send_msc_command || !ops->tmds_control) {
+		rc = -EFAULT;
+		goto err;
+	}
 
 	mhl_dev = kzalloc(sizeof(struct mhl_device), GFP_KERNEL);
 	if (!mhl_dev) {
 		pr_err("%s: out of memory!\n", __func__);
-		return ERR_PTR(-ENOMEM);
+		rc = -ENOMEM;
+		goto err;
 	}
 
 	mhl_dev->dev.class = mhl_class;
@@ -1423,10 +1613,17 @@ struct mhl_device *mhl_device_register(const char *name,
 	dev_set_name(&mhl_dev->dev, name);
 	dev_set_drvdata(&mhl_dev->dev, drvdata);
 
+#if defined(CONFIG_HAS_EARLYSUSPEND) && defined(CONFIG_MHL_RAP)
+	mhl_dev->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN;
+	mhl_dev->early_suspend.suspend = mhl_early_suspend;
+	mhl_dev->early_suspend.resume = mhl_early_resume;
+#endif
+	register_early_suspend(&mhl_dev->early_suspend);
+
 	rc = device_register(&mhl_dev->dev);
 	if (rc) {
-		kfree(mhl_dev);
-		return ERR_PTR(rc);
+		pr_err("%s: Failed to register device!\n", __func__);
+		goto err_register;
 	}
 
 	mhl_dev->ops = ops;
@@ -1442,12 +1639,56 @@ struct mhl_device *mhl_device_register(const char *name,
 #endif /* CONFIG_MHL_RAP */
 	INIT_WORK(&mhl_dev->usb_online_work, mhl_usb_online_work);
 
+#ifdef CONFIG_MHL_OSD_NAME
+	INIT_WORK(&mhl_dev->scratchpad_work, mhl_scratchpad_send_work);
+#endif /* CONFIG_MHL_OSD_NAME */
+
 	/* device added */
 	kobject_uevent(&mhl_dev->dev.kobj, KOBJ_ADD);
 
-	pr_info("MHL: mhl device (%s) registered\n", name);
+	mhl_dev->key_release_supported = 0;
+	mhl_dev->mouse_enabled = 0;
+	mhl_dev->mouse_move_distance_dx = 0;
+	mhl_dev->mouse_move_distance_dy = 0;
+	mhl_dev->input = input_allocate_device();
+	if (!mhl_dev->input) {
+		dev_err(&mhl_dev->dev, "failed to alloc input device\n");
+		rc = -ENOMEM;
+		goto err_input_alloc;
+	}
 
+	input = mhl_dev->input;
+	input->name = "mhl-rcp";
+
+	input->keycodesize = sizeof(u16);
+	input->keycodemax = 127 + 1;
+
+	input->evbit[0] = EV_KEY | EV_REP | EV_REL;
+	input_set_capability(input, EV_REL, REL_X);
+	input_set_capability(input, EV_REL, REL_Y);
+	input_set_capability(input, EV_KEY, BTN_LEFT);
+	for (i = 0; i < input->keycodemax; i++)
+		input_set_capability(input, EV_KEY, i + MHL_KEYCODE_OFFSET);
+
+	rc = input_register_device(input);
+	if (rc) {
+		dev_err(&mhl_dev->dev, "failed to register input device\n");
+		goto err_input_register;
+	}
+
+	pr_info("MHL: mhl device (%s) registered\n", name);
 	return mhl_dev;
+
+err_input_register:
+	input_free_device(input);
+	mhl_dev->input = NULL;
+err_input_alloc:
+	mhl_device_unregister(mhl_dev);
+err_register:
+	unregister_early_suspend(&mhl_dev->early_suspend);
+	kfree(mhl_dev);
+err:
+	return ERR_PTR(rc);
 }
 EXPORT_SYMBOL(mhl_device_register);
 
@@ -1459,10 +1700,16 @@ void mhl_device_unregister(struct mhl_device *mhl_dev)
 #ifdef CONFIG_MHL_RAP
 	del_timer(&mhl_dev->rap_send_timer);
 	del_timer(&mhl_dev->rap_retry_timer);
+	del_timer(&mhl_dev->rap_powerkey_timer);
 #endif /* CONFIG_MHL_RAP */
 	mutex_lock(&mhl_dev->ops_mutex);
+	if (mhl_dev->input) {
+		input_unregister_device(mhl_dev->input);
+		mhl_dev->input = NULL;
+	}
 	mhl_dev->ops = NULL;
 	mutex_unlock(&mhl_dev->ops_mutex);
+	unregister_early_suspend(&mhl_dev->early_suspend);
 	device_unregister(&mhl_dev->dev);
 }
 EXPORT_SYMBOL(mhl_device_unregister);
@@ -1473,9 +1720,11 @@ static struct device_attribute mhl_class_attributes[] = {
 	__ATTR(rap, 0660, NULL, mhl_store_rap),
 	__ATTR(device_id, 0440, mhl_show_device_id, NULL),
 	__ATTR(adopter_id, 0440, mhl_show_adopter_id, NULL),
-#ifdef CONFIG_MHL_OSD_NAME
-	__ATTR(scpd, 0660, NULL, mhl_store_scpd),
-#endif /* CONFIG_MHL_OSD_NAME */
+	__ATTR(mouse_mode, 0660, mhl_show_mouse_mode, mhl_store_mouse_mode),
+	__ATTR(mouse_move_distance_dx, 0660, NULL,
+		mhl_store_mouse_move_distance_dx),
+	__ATTR(mouse_move_distance_dy, 0660, NULL,
+		mhl_store_mouse_move_distance_dy),
 	__ATTR_NULL,
 };
 
@@ -1495,8 +1744,13 @@ static int __init mhl_class_init(void)
 	rap_command_workqueue = create_singlethread_workqueue
 					("mhl_rap_command");
 #endif /* CONFIG_MHL_RAP */
-	usb_online_workqueue = create_workqueue("mhl_usb_online");
 
+#ifdef CONFIG_MHL_OSD_NAME
+	scratchpad_workqueue = create_singlethread_workqueue
+					("mhl_scratchpad");
+#endif /* CONFIG_MHL_OSD_NAME */
+
+	usb_online_workqueue = create_workqueue("mhl_usb_online");
 	return 0;
 }
 
@@ -1510,5 +1764,5 @@ module_exit(mhl_class_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION("1.0");
-MODULE_AUTHOR("Sony Ericsson Mobile Communications AB");
-MODULE_DESCRIPTION("MHL Control Abstruction");
+MODULE_AUTHOR("Sony Mobile Communications AB");
+MODULE_DESCRIPTION("MHL Control Abstraction");

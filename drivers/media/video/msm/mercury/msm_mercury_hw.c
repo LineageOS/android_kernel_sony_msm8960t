@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -263,7 +263,7 @@ void msm_mercury_hw_delay(struct msm_mercury_hw_cmd *hw_cmd_p, int m_us)
 	}
 }
 
-int msm_mercury_hw_exec_cmds(struct msm_mercury_hw_cmd *hw_cmd_p, int m_cmds)
+int msm_mercury_hw_exec_cmds(struct msm_mercury_hw_cmd *hw_cmd_p, uint32_t m_cmds)
 {
 	int is_copy_to_user = -1;
 	uint32_t data;
