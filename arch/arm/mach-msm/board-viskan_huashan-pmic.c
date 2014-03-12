@@ -14,6 +14,7 @@
 #include <linux/interrupt.h>
 #include <linux/mfd/pm8xxx/pm8921.h>
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
+#include <linux/mfd/pm8xxx/vibrator.h>
 #include <linux/leds.h>
 #include <linux/leds-pm8xxx.h>
 #include <linux/msm_ssbi.h>
@@ -24,7 +25,6 @@
 #include <mach/restart.h>
 #include "devices.h"
 #include "board-8960.h"
-#include "charger-sony_viskan.h"
 
 struct pm8xxx_gpio_init {
 	unsigned			gpio;
@@ -443,17 +443,15 @@ static int pm8921_therm_mitigation[] = {
 };
 
 #define MAX_VOLTAGE_MV		4200
+#define V_CUTOFF_MV		3200
 #define CHG_TERM_MA		115
 static struct pm8921_charger_platform_data pm8921_chg_pdata __devinitdata = {
-	.safety_time		= 512,
-	.ttrkl_time		= 64,
 	.update_time		= 30000,
-	.update_time_at_low_bat	= 1000,
 	.max_voltage		= MAX_VOLTAGE_MV,
-	.min_voltage		= 3200,
+	.min_voltage		= V_CUTOFF_MV,
 	.uvd_thresh_voltage	= 4050,
-	.alarm_low_mv		= 3200,
-	.alarm_high_mv		= 3300,
+	.alarm_low_mv		= V_CUTOFF_MV,
+	.alarm_high_mv		= V_CUTOFF_MV + 100,
 	.resume_voltage_delta	= 120,
 	.resume_charge_percent	= 95,
 	.term_current		= CHG_TERM_MA,
@@ -461,21 +459,21 @@ static struct pm8921_charger_platform_data pm8921_chg_pdata __devinitdata = {
 	.warm_temp		= 45,
 	.hysteresis_temp	= 3,
 	.temp_check_period	= 1,
-	.safe_current_ma	= 1525,
 	.max_bat_chg_current	= 1525,
 	.cool_bat_chg_current	= 1525,
-	.warm_bat_chg_current	= 325,
+	.warm_bat_chg_current	= 350,
 	.cool_bat_voltage	= 4200,
 	.warm_bat_voltage	= 4000,
 	.thermal_mitigation	= pm8921_therm_mitigation,
 	.thermal_levels		= ARRAY_SIZE(pm8921_therm_mitigation),
 	.rconn_mohm		= 18,
+	.soc_scaling		= 1,
 	.btc_override		= 1,
 	.btc_override_cold_degc	= 5,
 	.btc_override_hot_degc	= 55,
 	.btc_delay_ms		= 10000,
 	.btc_panic_if_cant_stop_chg	= 1,
-	.soc_scaling		= 1,
+	.safety_time		= 512,
 };
 
 static struct pm8xxx_misc_platform_data pm8xxx_misc_pdata = {
@@ -483,18 +481,27 @@ static struct pm8xxx_misc_platform_data pm8xxx_misc_pdata = {
 };
 
 static struct pm8921_bms_platform_data pm8921_bms_pdata __devinitdata = {
-	.battery_data			= &pm8921_battery_data,
+	.battery_type			= BATT_OEM,
 	.r_sense_uohm			= 10000,
-	.v_cutoff			= 3200,
+	.v_cutoff			= V_CUTOFF_MV,
 	.max_voltage_uv			= MAX_VOLTAGE_MV * 1000,
 	.rconn_mohm			= 20,
 	.shutdown_soc_valid_limit	= 20,
 	.adjust_soc_low_threshold	= 25,
 	.chg_term_ua			= CHG_TERM_MA * 1000,
-	.enable_fcc_learning		= 1,
 	.normal_voltage_calc_ms		= 20000,
 	.low_voltage_calc_ms		= 1000,
-
+	.alarm_low_mv			= V_CUTOFF_MV,
+	.alarm_high_mv			= V_CUTOFF_MV + 100,
+	.high_ocv_correction_limit_uv	= 50,
+	.low_ocv_correction_limit_uv	= 100,
+	.hold_soc_est			= 3,
+	.low_voltage_detect		= 1,
+	.vbatt_cutoff_retries		= 5,
+	.enable_fcc_learning		= 1,
+	.min_fcc_learning_soc		= 20,
+	.min_fcc_ocv_pc			= 30,
+	.min_fcc_learning_samples	= 5,
 };
 
 #define	PM8921_LC_LED_MAX_CURRENT	4	/* I = 4mA */
@@ -579,11 +586,16 @@ static int pm8921_led0_pwm_duty_pcts[56] = {
 		14, 10, 6, 4, 1
 };
 
+/*
+ * Note: There is a bug in LPG module that results in incorrect
+ * behavior of pattern when LUT index 0 is used. So effectively
+ * there are 63 usable LUT entries.
+ */
 static struct pm8xxx_pwm_duty_cycles pm8921_led0_pwm_duty_cycles = {
 	.duty_pcts = (int *)&pm8921_led0_pwm_duty_pcts,
 	.num_duty_pcts = ARRAY_SIZE(pm8921_led0_pwm_duty_pcts),
 	.duty_ms = PM8XXX_LED_PWM_DUTY_MS,
-	.start_idx = 0,
+	.start_idx = 1,
 };
 
 static struct pm8xxx_led_config pm8921_led_configs[] = {
@@ -615,9 +627,9 @@ static struct pm8xxx_ccadc_platform_data pm8xxx_ccadc_pdata = {
 	.calib_delay_ms		= 600000,
 };
 
-/* Section: Vibrator */
 static struct pm8xxx_vibrator_platform_data pm8xxx_vibrator_pdata = {
 	.initial_vibrate_ms = 0,
+	.max_timeout_ms = 15000,
 	.level_mV = 3000,
 };
 

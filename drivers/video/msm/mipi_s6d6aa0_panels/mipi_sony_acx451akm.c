@@ -1,5 +1,6 @@
-/* drivers/video/msm/mipi_s6d6aa0_panels/mipi_auo_h455tvn01.c
+/* drivers/video/msm/mipi_s6d6aa0_panels/mipi_sony_acx451akm.c
  *
+ * Copyright (C) [2011] Sony Ericsson Mobile Communications AB.
  * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -15,6 +16,48 @@
 /* Display ON Sequence */
 static char exit_sleep[] = {
 	0x11
+};
+static char nvm_reg_access_enable1[] = {
+	0xF0, 0x5A, 0x5A
+};
+static char nvm_reg_access_enable2[] = {
+	0xF1, 0x5A, 0x5A
+};
+static char p_gamma_ctl[] = {
+	0xFA,
+	/* R */
+	0x25, 0x36, 0x0C, 0x01, 0x0A, 0x08, 0x00, 0x00,
+	0x03, 0x05, 0x05, 0x16, 0x1D, 0x21, 0x26, 0x2D,
+	0x33, 0x38, 0x39, 0x3D, 0x23,
+	/* G */
+	0x16, 0x38, 0x17, 0x10, 0x1B, 0x1A, 0x12, 0x11,
+	0x14, 0x14, 0x11, 0x1E, 0x24, 0x27, 0x2B, 0x30,
+	0x33, 0x36, 0x35, 0x37, 0x1D,
+	/* B */
+	0x1C, 0x38, 0x10, 0x05, 0x0D, 0x0B, 0x03, 0x03,
+	0x07, 0x09, 0x08, 0x17, 0x1F, 0x23, 0x29, 0x2D,
+	0x2F, 0x32, 0x32, 0x3B, 0x24,
+};
+static char n_gamma_ctl[] = {
+	0xFB,
+	/* R */
+	0x25, 0x36, 0x0C, 0x01, 0x0A, 0x08, 0x00, 0x00,
+	0x03, 0x05, 0x05, 0x16, 0x1D, 0x21, 0x26, 0x2D,
+	0x33, 0x38, 0x39, 0x3D, 0x23,
+	/* G */
+	0x16, 0x38, 0x17, 0x10, 0x1B, 0x1A, 0x12, 0x11,
+	0x14, 0x14, 0x11, 0x1E, 0x24, 0x27, 0x2B, 0x30,
+	0x33, 0x36, 0x35, 0x37, 0x1D,
+	/* B */
+	0x1C, 0x38, 0x10, 0x05, 0x0D, 0x0B, 0x03, 0x03,
+	0x07, 0x09, 0x08, 0x17, 0x1F, 0x23, 0x29, 0x2D,
+	0x2F, 0x32, 0x32, 0x3B, 0x24,
+};
+static char nvm_reg_access_disable1[] = {
+	0xF0, 0xA5, 0xA5
+};
+static char nvm_reg_access_disable2[] = {
+	0xF1, 0xA5, 0xA5
 };
 static char display_scan_ctrl[] = {
 	0x36, 0x80
@@ -36,26 +79,35 @@ static char read_ddb_start[] = {
 	0xA1, 0x00
 };
 
-static struct dsi_cmd_desc display_init_cmd_seq[] = {
+static struct dsi_cmd_desc sony_display_on_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 140,
 		sizeof(exit_sleep), exit_sleep},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(nvm_reg_access_enable1), nvm_reg_access_enable1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(nvm_reg_access_enable2), nvm_reg_access_enable2},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(p_gamma_ctl), p_gamma_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(n_gamma_ctl), n_gamma_ctl},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(nvm_reg_access_disable1), nvm_reg_access_disable1},
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 0,
+		sizeof(nvm_reg_access_disable2), nvm_reg_access_disable2},
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
 		sizeof(display_scan_ctrl), display_scan_ctrl},
-};
-
-static struct dsi_cmd_desc display_on_cmd_seq[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
 		sizeof(display_on), display_on},
 };
 
-static struct dsi_cmd_desc display_off_cmd_seq[] = {
+static struct dsi_cmd_desc sony_display_off_cmds[] = {
 	{DTYPE_DCS_WRITE, 1, 0, 0, 0,
 		sizeof(display_off), display_off},
 	{DTYPE_DCS_WRITE, 1, 0, 0, 130,
 		sizeof(enter_sleep), enter_sleep}
 };
 
-static struct dsi_cmd_desc read_ddb_cmd_seq[] = {
+static struct dsi_cmd_desc read_ddb_start_cmds[] = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(read_ddb_start), read_ddb_start},
 };
 
@@ -65,17 +117,41 @@ static const struct mipi_dsi_phy_ctrl dsi_video_mode_phy_db[] = {
 		/* regulator */
 		{0x03, 0x0a, 0x04, 0x00, 0x20},
 		/* timing */
-		{0x7a, 0x1b, 0x12, 0x00, 0x3f, 0x49, 0x17, 0x1e,
+		{0x7b, 0x1b, 0x12, 0x00, 0x40, 0x49, 0x17, 0x1e,
 		 0x1e, 0x03, 0x04, 0xa0},
 		/* phy ctrl */
 		{0x5f, 0x00, 0x00, 0x10},
 		/* strength */
 		{0xff, 0x00, 0x06, 0x00},
 		/* pll control */
-		{0x01, 0x9c, 0x31, 0xd9, 0x00, 0x50, 0x48, 0x63,
+		{0x01, 0x9e, 0x31, 0xd9, 0x00, 0x50, 0x48, 0x63,
 		 0x41, 0x0f, 0x03,
 		 0x00, 0x14, 0x03, 0x00, 0x02, 0x00, 0x20, 0x00, 0x01 },
 	},
+};
+static const struct mipi_dsi_lane_cfg  lncfg = {
+	/* DSI1_DSIPHY_LN_CFG */
+	.ln_cfg = {
+		{0x80, 0xEF, 0x00},
+		{0x80, 0xEF, 0x00},
+		{0x80, 0xEF, 0x00},
+		{0x80, 0xEF, 0x00}
+	},
+	/* DSI1_DSIPHY_LN_TEST_DATAPATH */
+	.ln_dpath = {0x00, 0x00, 0x00, 0x00},
+	/* DSI1_DSIPHY_LN_TEST_STR */
+	.ln_str = {
+		{0x01, 0x66},
+		{0x01, 0x66},
+		{0x01, 0x66},
+		{0x01, 0x66}
+	},
+	/* DSI1_DSIPHY_LNCK_CFG */
+	.lnck_cfg = {0x40, 0xEF, 0x00},
+	/* DSI1_DSIPHY_LNCK_TEST_DATAPATH */
+	.lnck_dpath = 0x0,
+	/* DSI1_DSIPHY_LNCK_TEST_STR */
+	.lnck_str = {0x01, 0x88},
 };
 
 static struct msm_panel_info pinfo;
@@ -90,18 +166,18 @@ static struct msm_panel_info *get_panel_info(void)
 	pinfo.wait_cycle = 0;
 	pinfo.bpp = 24;
 	pinfo.lcdc.h_back_porch = 64;
-	pinfo.lcdc.h_front_porch = 118;
-	pinfo.lcdc.h_pulse_width = 10;
-	pinfo.lcdc.v_back_porch = 15;
-	pinfo.lcdc.v_front_porch = 10;
-	pinfo.lcdc.v_pulse_width = 2;
+	pinfo.lcdc.h_front_porch = 64;
+	pinfo.lcdc.h_pulse_width = 16;
+	pinfo.lcdc.v_back_porch = 51;
+	pinfo.lcdc.v_front_porch = 51;
+	pinfo.lcdc.v_pulse_width = 4;
 	pinfo.lcdc.border_clr = 0;	/* blk */
 	pinfo.lcdc.underflow_clr = 0xff;	/* blue */
 	pinfo.lcdc.hsync_skew = 0;
 	pinfo.bl_max = 15;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
-	pinfo.clk_rate = 428884600;
+	pinfo.clk_rate = 431000000;
 
 	pinfo.mipi.mode = DSI_VIDEO_MODE;
 	pinfo.mipi.pulse_mode_hsa_he = TRUE;
@@ -125,7 +201,7 @@ static struct msm_panel_info *get_panel_info(void)
 	pinfo.mipi.tx_eot_append = TRUE;
 	pinfo.mipi.t_clk_post = 0x04;
 	pinfo.mipi.t_clk_pre = 0x1b;
-	pinfo.mipi.esc_byte_ratio = 2;
+	pinfo.mipi.esc_byte_ratio = 4;
 	pinfo.mipi.stream = 0; /* dma_p */
 	pinfo.mipi.mdp_trigger = DSI_CMD_TRIGGER_SW;
 	pinfo.mipi.dma_trigger = DSI_CMD_TRIGGER_SW;
@@ -138,54 +214,52 @@ static struct msm_panel_info *get_panel_info(void)
 }
 
 static struct dsi_controller dsi_video_controller_panel = {
-	.get_panel_info = get_panel_info,
-	.display_init_cmds = display_init_cmd_seq,
-	.display_on_cmds = display_on_cmd_seq,
-	.display_off_cmds = display_off_cmd_seq,
-	.read_id_cmds = read_ddb_cmd_seq,
-	.display_init_cmds_size = ARRAY_SIZE(display_init_cmd_seq),
-	.display_on_cmds_size = ARRAY_SIZE(display_on_cmd_seq),
-	.display_off_cmds_size = ARRAY_SIZE(display_off_cmd_seq),
+	.get_panel_info        = get_panel_info,
+	.display_on_cmds       = sony_display_on_cmds,
+	.display_off_cmds      = sony_display_off_cmds,
+	.read_id_cmds          = read_ddb_start_cmds,
+	.display_on_cmds_size  = ARRAY_SIZE(sony_display_on_cmds),
+	.display_off_cmds_size = ARRAY_SIZE(sony_display_off_cmds),
 };
 
 static char ddb_val_1a[] = {
-	0x00, 0x00, 0x1a, 0x01, 0xff
+	0x43, 0x91, 0x1a, 0x01, 0xff
 };
 
 static char ddb_val[] = {
-	0x00, 0x00, 0xff, 0xff, 0xff
+	0x43, 0x91, 0xff, 0xff, 0xff
 };
 
 static char default_ddb_val[] = {
-	0x00, 0x00
+	0x43, 0x91
 };
 
-const struct panel_id auo_h455tvn01_panel_id_1a = {
-	.name = "mipi_video_auo_wxga_h455tvn01_id_1a",
+const struct panel_id sony_acx451akm_panel_id_1a = {
+	.name = "mipi_video_sony_wxga_acx451akm_id_1a",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val_1a,
 	.id_num = ARRAY_SIZE(ddb_val_1a),
 	.width = 53,
 	.height = 95,
-	.esd_failed_check = true,
+	.plncfg = &lncfg,
 };
 
-const struct panel_id auo_h455tvn01_panel_id = {
-	.name = "mipi_video_auo_wxga_h455tvn01",
+const struct panel_id sony_acx451akm_panel_id = {
+	.name = "mipi_video_sony_wxga_acx451akm",
 	.pctrl = &dsi_video_controller_panel,
 	.id = ddb_val,
 	.id_num = ARRAY_SIZE(ddb_val),
 	.width = 53,
 	.height = 95,
-	.esd_failed_check = true,
+	.plncfg = &lncfg,
 };
 
-const struct panel_id auo_h455tvn01_panel_default = {
-	.name = "mipi_auo_panel",
+const struct panel_id sony_acx451akm_panel_default = {
+	.name = "mipi_sony_panel",
 	.pctrl = &dsi_video_controller_panel,
 	.id = default_ddb_val,
 	.id_num = ARRAY_SIZE(default_ddb_val),
 	.width = 53,
 	.height = 95,
-	.esd_failed_check = true,
+	.plncfg = &lncfg,
 };

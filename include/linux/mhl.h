@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Sony Ericsson Mobile Communications AB.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  * Copyright (C) 2011 Silicon Image Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -20,7 +20,10 @@
 #ifdef __KERNEL__
 
 #include <linux/device.h>
+#include <linux/input.h>
 #include <linux/mutex.h>
+#include <linux/mhl_defs.h>
+#include <linux/earlysuspend.h>
 
 #define TRUE 1
 #define FALSE 0
@@ -82,6 +85,19 @@ struct mhl_rap_event {
 };
 #endif
 
+#ifdef CONFIG_MHL_OSD_NAME
+#define MHL_ADOPTER_ID_SOMC	0x03A7
+#define MHL_SCPD_GIVE_OSD_NAME	0xA1
+#define MHL_SCPD_SET_OSD_NAME	0xA2
+#define MHL_OSD_NAME_SIZE	12
+struct mhl_osd_msg {
+	u16 adopter_id;
+	u8 command_id;
+	u8 name[MHL_OSD_NAME_SIZE];
+	u8 decrement_cnt;
+} __packed;
+#endif /* CONFIG_MHL_OSD_NAME */
+
 struct mhl_device {
 	struct device dev;
 
@@ -89,6 +105,7 @@ struct mhl_device {
 	const struct mhl_ops *ops;
 
 	int full_operation;
+	int suspended;
 
 	struct mhl_state state;
 	unsigned int mhl_online;
@@ -111,6 +128,13 @@ struct mhl_device {
 	struct work_struct rap_retry_work;
 	int rap_command_counter;
 	struct list_head rap_queue;
+	struct timer_list rap_powerkey_timer;
+#endif
+
+#ifdef CONFIG_MHL_OSD_NAME
+	/* Scratchpad send control */
+	struct mhl_osd_msg scratchpad_send_data;
+	struct work_struct scratchpad_work;
 #endif
 
 	/* MSC WRITE BURST */
@@ -119,6 +143,14 @@ struct mhl_device {
 
 	/* USB interface */
 	struct work_struct usb_online_work;
+
+	int key_release_supported;
+	int mouse_enabled;
+	int mouse_move_distance_dx;
+	int mouse_move_distance_dy;
+	struct input_dev *input;
+
+	struct early_suspend early_suspend;
 };
 
 /********************************
@@ -217,6 +249,7 @@ extern int mhl_full_operation(const char *name, int enable);
 extern struct mhl_device *mhl_device_register(const char *name,
 	struct device *parent, void *devdata, const struct mhl_ops *ops);
 extern void mhl_device_unregister(struct mhl_device *mhl_dev);
+extern void mhl_device_shutdown(struct mhl_device *mhl_dev);
 
 
 #endif /* __KERNEL__ */

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Sony Ericsson Mobile Communications AB.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  * Copyright (C) 2011 Silicon Image Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -35,19 +35,21 @@
 
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
+#include <linux/mfd/pm8xxx/pm8921.h>
 
 #ifdef DEBUG
 #define MHL_DEV_DBG(format, arg...) \
 	if (mhl_state->mhl_dev) \
-		dev_info(&mhl_state->mhl_dev->dev, format, ##arg)
+		(dev_info(&mhl_state->mhl_dev->dev, format, ##arg))
 #else
 #define MHL_DEV_DBG(format, arg...) \
 	do {} while (0)
 #endif
-
 #define MSC_COMMAND_TIME_OUT 2050
+
 #define CHARGER_INIT_WAIT 30
 #define CHARGER_INIT_DELAYED_TIME 20
+#define PM8921_CHG_MHL_VINMIN 4700
 enum {
 	POWER_STATE_D0_MHL = 0,
 	POWER_STATE_D0_NO_MHL = 2,
@@ -91,6 +93,11 @@ static u8 chip_rev_id;
 
 static void mhl_sii_chip_init(void);
 static int mhl_sii_hpd_control(int enable);
+
+bool mhl_is_connected(void)
+{
+	return true;
+}
 
 static int mhl_sii_reg_read(u8 addr, u8 off, u8 *buff, u16 len)
 {
@@ -400,20 +407,22 @@ static int mhl_sii_rgnd(void)
 		mutex_unlock(&mhl_state_mutex);
 		mhl_notify_plugged(mhl_state->mhl_dev);
 		if (mhl_state->charging_enable) {
-			/* 700 means 700mA charging ready */
-			ret = mhl_state->charging_enable(TRUE, 700);
-			if (ret) {
-				/* We used late_initcall before for
-				 * charger_enable(). Still, call of
-				 * charger_enable() is some fail.
-				 * Waits here until initialization success it.
-				 */
-				counter = CHARGER_INIT_WAIT;
-				while (ret && counter--) {
-					msleep(CHARGER_INIT_DELAYED_TIME);
+			/* We used late_initcall before for
+			* charger_enable(). Still, call of
+			* set_vin_min and charger_enable() is some fail.
+			* Waits here until initialization success it.
+			*/
+			counter = CHARGER_INIT_WAIT;
+			ret = -1;
+			while (ret && counter--) {
+				ret = pm8921_set_chg_vin_min
+						(FALSE, PM8921_CHG_MHL_VINMIN);
+				if (!ret)
 					ret = mhl_state->charging_enable
-						(TRUE, 700);
-				}
+								(TRUE, 700);
+				if (!ret)
+					break;
+				msleep(CHARGER_INIT_DELAYED_TIME);
 			}
 		}
 		pr_info("mhl: MHL detected\n");
@@ -501,6 +510,8 @@ static void mhl_discovery_timer_work(struct work_struct *w)
 		mhl_notify_unplugged(mhl_state->mhl_dev);
 		wake_unlock(&mhl_wake_lock);
 		if (mhl_state->charging_enable)
+			/* recover the minimum charge voltage */
+			pm8921_set_chg_vin_min(TRUE, 0);
 			mhl_state->charging_enable(FALSE, 0);
 		del_timer(&mhl_state->discovery_timer);
 		mhl_state->notify_plugged = FALSE;
@@ -747,6 +758,8 @@ static int mhl_sii_charging_control(int enable, int max_curr)
 		return -EFAULT;
 	}
 
+	/* recover the minimum charge voltage */
+	pm8921_set_chg_vin_min(TRUE, 0);
 	if (enable) {
 		regval = MHL_SII_PAGE3_REG_READ(0x17);
 		MHL_SII_PAGE3_REG_WRITE
@@ -1247,6 +1260,11 @@ static int mhl_sii_remove(struct i2c_client *client)
 	return 0;
 }
 
+static void mhl_sii_shutdown(struct i2c_client *client)
+{
+	mhl_device_shutdown(mhl_state->mhl_dev);
+}
+
 #ifdef CONFIG_PM
 static int mhl_sii_i2c_suspend(struct device *dev)
 {
@@ -1297,6 +1315,7 @@ static struct i2c_driver mhl_sii_i2c_driver = {
 	},
 	.probe = mhl_sii_probe,
 	.remove = mhl_sii_remove,
+	.shutdown = mhl_sii_shutdown,
 	.id_table = mhl_sii_id,
 };
 

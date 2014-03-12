@@ -28,7 +28,7 @@
 
 #include "devices.h"
 #include "board-8960.h"
-#include <video/mipi_dsi_panel.h>
+#include "board-viskan-display.h"
 
 #ifdef CONFIG_FB_MSM_MHL_SII8334
 #include <linux/mhl_sii8334.h>
@@ -63,17 +63,6 @@
 
 #define MDP_VSYNC_GPIO 0
 
-#define MIPI_CMD_NOVATEK_QHD_PANEL_NAME	"mipi_cmd_novatek_qhd"
-#define MIPI_VIDEO_NOVATEK_QHD_PANEL_NAME	"mipi_video_novatek_qhd"
-#define MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME	"mipi_video_toshiba_wsvga"
-#define MIPI_VIDEO_TOSHIBA_WUXGA_PANEL_NAME	"mipi_video_toshiba_wuxga"
-#define MIPI_VIDEO_CHIMEI_WXGA_PANEL_NAME	"mipi_video_chimei_wxga"
-#define MIPI_VIDEO_CHIMEI_WUXGA_PANEL_NAME	"mipi_video_chimei_wuxga"
-#define MIPI_VIDEO_SIMULATOR_VGA_PANEL_NAME	"mipi_video_simulator_vga"
-#define MIPI_CMD_RENESAS_FWVGA_PANEL_NAME	"mipi_cmd_renesas_fwvga"
-#define MIPI_VIDEO_ORISE_720P_PANEL_NAME	"mipi_video_orise_720p"
-#define MIPI_CMD_ORISE_720P_PANEL_NAME		"mipi_cmd_orise_720p"
-#define MIPI_VIDEO_RENESAS_FWVGA_PANEL_NAME "mipi_video_renesas_fwvga"
 #define HDMI_PANEL_NAME	"hdmi_msm"
 #define TVOUT_PANEL_NAME	"tvout_msm"
 
@@ -98,21 +87,12 @@ static void set_mdp_clocks_for_wuxga(void);
 
 static int msm_fb_detect_panel(const char *name)
 {
-	pr_err("%s: comparing name=%s with %s\n", __func__, name,
-			MIPI_VIDEO_RENESAS_FWVGA_PANEL_NAME);
-
-	if (!strncmp(name, MIPI_VIDEO_RENESAS_FWVGA_PANEL_NAME,
-			strnlen(MIPI_VIDEO_RENESAS_FWVGA_PANEL_NAME,
-				PANEL_NAME_MAX_LEN))) {
-		return 0;
-	}
-
 	if (!strncmp(name, HDMI_PANEL_NAME,
 			strnlen(HDMI_PANEL_NAME,
 				PANEL_NAME_MAX_LEN))) {
 		if (hdmi_is_primary)
 			set_mdp_clocks_for_wuxga();
-		return 0;
+			return 0;
 	}
 
 	if (!strncmp(name, TVOUT_PANEL_NAME,
@@ -204,7 +184,7 @@ out_pwr:
 	return rc;
 }
 
-static int lcd_power(bool on)
+static int lcd_power(int on)
 {
 	if (on)
 		gpio_set_value(LCD_PWR_EN, 1);
@@ -215,7 +195,7 @@ static int lcd_power(bool on)
 	return 0;
 }
 
-static int lcd_reset(bool on)
+static int lcd_reset(int on)
 {
 	int rc;
 
@@ -526,7 +506,7 @@ static int r63306_lcd_power(int on)
 	return rc;
 }
 
-static const struct panel *default_panel_ids_r63306[] = {
+static const struct panel_id *default_panel_ids_r63306[] = {
 #ifdef CONFIG_FB_MSM_MIPI_R63306_PANEL_SHARP_LS046K3SY01
 	&sharp_ls046k3sy01_panel_default,
 #endif /*CONFIG_FB_MSM_MIPI_R63306_PANEL_SHARP_LS046K3SY01*/
@@ -540,7 +520,7 @@ static const struct panel *default_panel_ids_r63306[] = {
 	NULL,
 };
 
-static const struct panel *panel_ids_r63306[] = {
+static const struct panel_id *panel_ids_r63306[] = {
 #ifdef CONFIG_FB_MSM_MIPI_R63306_PANEL_SHARP_LS046K3SY01
 	&sharp_ls046k3sy01_panel_id_1a,
 	&sharp_ls046k3sy01_panel_id,
@@ -653,14 +633,14 @@ static int s6d6aa0_lcd_power(int on)
 	return rc;
 }
 
-static const struct panel *default_panel_ids_s6d6aa0[] = {
+static const struct panel_id *default_panel_ids_s6d6aa0[] = {
 #ifdef CONFIG_FB_MSM_MIPI_S6D6AA0_PANEL_AUO_H455TVN01
 	&auo_h455tvn01_panel_default,
 #endif /* CONFIG_FB_MSM_MIPI_S6D6AA0_PANEL_AUO_H455TVN01 */
 	NULL,
 };
 
-static const struct panel *panel_ids_s6d6aa0[] = {
+static const struct panel_id *panel_ids_s6d6aa0[] = {
 #ifdef CONFIG_FB_MSM_MIPI_S6D6AA0_PANEL_AUO_H455TVN01
 	&auo_h455tvn01_panel_id_1a,
 	&auo_h455tvn01_panel_id,
@@ -671,218 +651,78 @@ static const struct panel *panel_ids_s6d6aa0[] = {
 #endif /* CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0 */
 
 
-#ifdef CONFIG_FB_MSM_MIPI_DSI_NOVATEK_NT35565
+#ifdef CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET
 
-#define MIPI_DSI_NOVATEK_NAME "mipi_novatek_nt35565"
+const struct panel_id **default_panel_ids;
+const struct panel_id **panel_ids;
 
-#define LCD_RESET_H_WAIT_MS_NT35565 120
+static struct mipi_dsi_platform_data mipi_dsi_pdata;
 
-static int nt35565_vreg_power(int on)
-{
-	int rc = 0;
-
-	if (!vreg_lcd_vci) {
-		vreg_lcd_vci = regulator_get(&msm_mipi_dsi1_device.dev,
-			"dsi_vci");
-		if (IS_ERR(vreg_lcd_vci)) {
-			pr_err("could not get dsi_vci, rc = %ld\n",
-				PTR_ERR(vreg_lcd_vci));
-			return -ENODEV;
-		}
-	}
-
-	if (!vreg_lcd_vddio) {
-		vreg_lcd_vddio = regulator_get(&msm_mipi_dsi1_device.dev,
-			"dsi_vddio");
-		if (IS_ERR(vreg_lcd_vddio)) {
-			pr_err("%s: Unable to get dsi_vddio\n", __func__);
-			vreg_lcd_vddio = NULL;
-			goto out_put;
-		}
-	}
-
-	if (on) {
-		rc = regulator_set_voltage(vreg_lcd_vci, 2850000, 2850000);
-		if (rc) {
-			pr_err("%s:%d unable to set dsi_vci voltage to 2.8V\n",
-				__func__, rc);
-			goto out_put_all;
-		}
-
-		rc = regulator_enable(vreg_lcd_vci);
-		if (rc) {
-			pr_err("%s: Enable regulator dsi_vci failed\n",
-				__func__);
-			goto out_put_all;
-		}
-
-		rc = regulator_set_voltage(vreg_lcd_vddio, 1800000, 1800000);
-		if (rc) {
-			pr_err("%s:%d unable to set dsi_vddio voltage to 1.8V\n",
-				__func__, rc);
-			goto out_disable;
-		}
-
-		rc = regulator_enable(vreg_lcd_vddio);
-		if (rc) {
-			pr_err("%s: Enable regulator dsi_vddio failed\n",
-				__func__);
-			goto out_disable;
-		}
-
-		rc = lcd_gpio_setup(on);
-		if (rc) {
-			pr_err("gpio setup failed , rc=%d\n", rc);
-			goto out_disable_all;
-		}
-
-		msleep(LCD_VREG_ON_WAIT_MS);
-
-		gpio_set_value_cansleep(gpio_lcd_reset, 1);
-		msleep(LCD_RESET_WAIT_MS);
-		gpio_set_value_cansleep(gpio_lcd_reset, 0);
-		msleep(LCD_RESET_WAIT_MS);
-		gpio_set_value_cansleep(gpio_lcd_reset, 1);
-		msleep(LCD_RESET_H_WAIT_MS_NT35565);
-	} else {
-		gpio_set_value_cansleep(gpio_lcd_reset, 0);
-
-		rc = lcd_gpio_setup(on);
-		if (rc) {
-			pr_err("gpio setup failed , rc=%d\n", rc);
-			return -EINVAL;
-		}
-
-		rc = regulator_disable(vreg_lcd_vci);
-		if (rc)
-			pr_warning("%s: '%s' regulator disable failed, rc=%d\n",
-				__func__, "dsi_vci", rc);
-		rc = regulator_disable(vreg_lcd_vddio);
-		if (rc)
-			pr_warning("%s: '%s' regulator disable failed, rc=%d\n",
-				__func__, "dsi_vddio", rc);
-	}
-
-	return 0;
-out_disable_all:
-	regulator_disable(vreg_lcd_vddio);
-out_disable:
-	regulator_disable(vreg_lcd_vci);
-out_put_all:
-	regulator_put(vreg_lcd_vddio);
-	vreg_lcd_vddio = NULL;
-out_put:
-	regulator_put(vreg_lcd_vci);
-	vreg_lcd_vci = NULL;
-	return rc;
-}
-
-static int nt35565_lcd_power(int on)
-{
-	static int curr_power;
-	int rc;
-
-	if (curr_power == on)
-		return 0;
-
-	if (on) {
-		rc = nt35565_vreg_power(on);
-		if (!rc)
-			rc = mipi_dsi_power(on);
-	} else {
-		rc = mipi_dsi_power(on);
-		if (!rc)
-			rc = nt35565_vreg_power(on);
-	}
-
-	if (!rc)
-		curr_power = on;
-
-	return rc;
-}
-
-static const struct panel *default_panel_ids_nt35565[] = {
-#ifdef CONFIG_FB_MSM_MIPI_NT35565_PANEL_SHARP_LS038K3SX01
-	&sharp_ls038k3sx01_panel_default,
-#endif /* CONFIG_FB_MSM_MIPI_NT35565_PANEL_SHARP_LS038K3SX01 */
-	NULL,
+static struct platform_device sony_viskan_lcd_device = {
+	.id = 0,
 };
+#else /* CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET */
 
-static const struct panel *panel_ids_nt35565[] = {
-#ifdef CONFIG_FB_MSM_MIPI_NT35565_PANEL_SHARP_LS038K3SX01
-	&sharp_ls038k3sx01_panel_id_1a,
-	&sharp_ls038k3sx01_panel_id_1b,
-	&sharp_ls038k3sx01_panel_id,
-#endif /* CONFIG_FB_MSM_MIPI_NT35565_PANEL_SHARP_LS038K3SX01 */
-	NULL,
-};
+#ifdef CONFIG_FB_MSM_MIPI_DSI_RENESAS_R63306
 
-#endif /* CONFIG_FB_MSM_MIPI_DSI_NOVATEK_NT35565 */
+const struct panel_id **default_panel_ids = default_panel_ids_r63306;
+const struct panel_id **panel_ids = panel_ids_r63306;
 
-static struct platform_device mipi_dsi_panel_device = {
-	.name = MIPI_DSI_PANEL_NAME,
+static struct platform_device sony_viskan_lcd_device = {
+	.name = MIPI_DSI_RENESAS_NAME,
 	.id = 0,
 };
 
-const struct panel **default_panel_ids;
-const struct panel **panel_ids;
-static struct mipi_dsi_platform_data mipi_dsi_pdata;
+static struct mipi_dsi_platform_data mipi_dsi_pdata = {
+	.dsi_power_save   = r63306_lcd_power,
+};
+#endif /* CONFIG_FB_MSM_MIPI_DSI_RENESAS_R63306 */
 
-void __init mipi_dsi_panel_add_device(void)
+#ifdef CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0
+
+const struct panel_id **default_panel_ids = default_panel_ids_s6d6aa0;
+const struct panel_id **panel_ids = panel_ids_s6d6aa0;
+
+static struct platform_device sony_viskan_lcd_device = {
+	.name = MIPI_DSI_SAMSUNG_NAME,
+	.id = 0,
+};
+
+static struct mipi_dsi_platform_data mipi_dsi_pdata = {
+	.dsi_power_save   = s6d6aa0_lcd_power,
+};
+#endif /* CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0 */
+
+#endif /* CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET */
+
+void __init sony_viskan_add_lcd_device(void)
 {
 	int rc;
-	struct panel_platform_data *pdata;
+	struct lcd_panel_platform_data *pdata;
 
-	pdata = kmalloc(sizeof(struct panel_platform_data), GFP_KERNEL);
-#ifndef CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET
-#ifdef CONFIG_FB_MSM_MIPI_DSI_RENESAS_R63306
-	default_panel_ids = default_panel_ids_r63306;
-	panel_ids = panel_ids_r63306;
-	mipi_dsi_pdata.dsi_power_save = r63306_lcd_power;
-	pdata->vreg_power = r63306_vreg_power;
-	pdata->ic_vendor = NVRW_DRV_RENESAS;
-#endif /*CONFIG_FB_MSM_MIPI_DSI_RENESAS_R63306*/
-#ifdef CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0
-	default_panel_ids = default_panel_ids_s6d6aa0;
-	panel_ids = panel_ids_s6d6aa0;
-	mipi_dsi_pdata.dsi_power_save = s6d6aa0_lcd_power;
-	pdata->vreg_power = s6d6aa0_vreg_power;
-	pdata->ic_vendor = NVRW_DRV_SAMSUNG;
-#endif /*CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0*/
-#ifdef CONFIG_FB_MSM_MIPI_DSI_NOVATEK_NT35565
-	default_panel_ids = default_panel_ids_nt35565;
-	panel_ids = panel_ids_nt35565;
-	mipi_dsi_pdata.dsi_power_save = nt35565_lcd_power;
-#endif /*CONFIG_FB_MSM_MIPI_DSI_NOVATEK_NT35565*/
-#else /*CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET*/
-	if (sony_viskan_is_dric_det() == LCD_VENDOR_SAMSUNG) {
-#ifdef CONFIG_FB_MSM_MIPI_DSI_SAMSUNG_S6D6AA0
-		default_panel_ids = default_panel_ids_s6d6aa0;
-		panel_ids = panel_ids_s6d6aa0;
-		mipi_dsi_pdata.dsi_power_save = s6d6aa0_lcd_power;
-		pdata->vreg_power = s6d6aa0_vreg_power;
-		pdata->ic_vendor = NVRW_DRV_SAMSUNG;
-#endif
-	} else {
-#ifdef CONFIG_FB_MSM_MIPI_DSI_RENESAS_R63306
-		default_panel_ids = default_panel_ids_r63306;
-		panel_ids = panel_ids_r63306;
-		mipi_dsi_pdata.dsi_power_save = r63306_lcd_power;
-		pdata->vreg_power = r63306_vreg_power;
-		pdata->ic_vendor = NVRW_DRV_RENESAS;
-#endif
-	}
-#endif /* CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET */
+	pdata = kmalloc(sizeof(struct lcd_panel_platform_data), GFP_KERNEL);
 
 	pdata->default_panels = default_panel_ids;
 	pdata->panels = panel_ids;
-	pdata->platform_power = lcd_power;
-	pdata->platform_reset = lcd_reset;
+	pdata->lcd_power = lcd_power;
+	pdata->lcd_reset = lcd_reset;
 
-	mipi_dsi_panel_device.dev.platform_data = pdata;
-	rc = platform_device_register(&mipi_dsi_panel_device);
+#ifdef CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET
+	if (sony_viskan_is_dric_det() == LCD_VENDOR_SAMSUNG) {
+		sony_viskan_lcd_device.name = MIPI_DSI_SAMSUNG_NAME;
+		pdata->default_panels = default_panel_ids_s6d6aa0;
+		pdata->panels = panel_ids_s6d6aa0;
+	} else {
+		sony_viskan_lcd_device.name = MIPI_DSI_RENESAS_NAME;
+		pdata->default_panels = default_panel_ids_r63306;
+		pdata->panels = panel_ids_r63306;
+	}
+#endif /* CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET */
+
+	sony_viskan_lcd_device.dev.platform_data = pdata;
+	rc = platform_device_register(&sony_viskan_lcd_device);
 	if (rc)
-		dev_err(&mipi_dsi_panel_device.dev,
+		dev_err(&sony_viskan_lcd_device.dev,
 			"%s: platform_device_register() failed = %d\n",
 			__func__, rc);
 
@@ -972,9 +812,19 @@ static struct msm_bus_scale_pdata mdp_bus_scale_pdata = {
 
 #endif
 
+static int mdp_core_clk_rate_table[] = {
+	85330000,
+	128000000,
+	200000000,
+	200000000,
+};
+
 static struct msm_panel_common_pdata mdp_pdata = {
 	.gpio = MDP_VSYNC_GPIO,
 	.mdp_max_clk = 200000000,
+	.mdp_max_bw = 2000000000,
+	.mdp_bw_ab_factor = 115,
+	.mdp_bw_ib_factor = 150,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.mdp_bus_scale_table = &mdp_bus_scale_pdata,
 #endif
@@ -997,6 +847,9 @@ void __init msm8960_mdp_writeback(struct memtype_reserve* reserve_table)
 		mdp_pdata.ov0_wb_size;
 	reserve_table[mdp_pdata.mem_hid].size +=
 		mdp_pdata.ov1_wb_size;
+
+	pr_info("mem_map: mdp reserved with size 0x%lx in pool\n",
+			mdp_pdata.ov0_wb_size + mdp_pdata.ov1_wb_size);
 #endif
 }
 
@@ -1281,15 +1134,21 @@ void __init msm8960_init_fb(void)
 	if (cpu_is_msm8960ab())
 		mdp_pdata.mdp_rev = MDP_REV_44;
 
+	sony_viskan_add_lcd_device();
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 	platform_device_register(&hdmi_msm_device);
 #endif
-	mipi_dsi_panel_add_device();
 	platform_device_register(&msm_fb_device);
 #ifdef CONFIG_FB_MSM_WRITEBACK_MSM_PANEL
 	platform_device_register(&wfd_device);
 #endif
 	msm_fb_register_device("mdp", &mdp_pdata);
+#ifdef CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET
+	if (sony_viskan_is_dric_det() == LCD_VENDOR_SAMSUNG)
+		mipi_dsi_pdata.dsi_power_save = s6d6aa0_lcd_power;
+	else
+		mipi_dsi_pdata.dsi_power_save = r63306_lcd_power;
+#endif /* CONFIG_FB_MSM_MIPI_DSI_VENDOR_DET */
 	msm_fb_register_device("mipi_dsi", &mipi_dsi_pdata);
 #ifdef CONFIG_MSM_BUS_SCALING
 	msm_fb_register_device("dtv", &dtv_pdata);
@@ -1315,6 +1174,8 @@ void __init msm8960_allocate_fb_region(void)
  */
 static void set_mdp_clocks_for_wuxga(void)
 {
+	int i;
+
 	mdp_ui_vectors[0].ab = 2000000000;
 	mdp_ui_vectors[0].ib = 2000000000;
 	mdp_vga_vectors[0].ab = 2000000000;
@@ -1323,6 +1184,10 @@ static void set_mdp_clocks_for_wuxga(void)
 	mdp_720p_vectors[0].ib = 2000000000;
 	mdp_1080p_vectors[0].ab = 2000000000;
 	mdp_1080p_vectors[0].ib = 2000000000;
+
+
+	for (i = 0; i < ARRAY_SIZE(mdp_core_clk_rate_table); i++)
+		mdp_core_clk_rate_table[i] = 200000000;
 
 	if (hdmi_is_primary) {
 		dtv_bus_def_vectors[0].ab = 2000000000;
@@ -1339,14 +1204,6 @@ void __init msm8960_set_display_params(char *prim_panel, char *ext_panel)
 		pr_debug("msm_fb_pdata.prim_panel_name %s\n",
 			msm_fb_pdata.prim_panel_name);
 
-		if (strncmp((char *)msm_fb_pdata.prim_panel_name,
-			MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME,
-			strnlen(MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME,
-				PANEL_NAME_MAX_LEN))) {
-			/* Disable splash for panels other than Toshiba WSVGA */
-			disable_splash = 1;
-		}
-
 		if (!strncmp((char *)msm_fb_pdata.prim_panel_name,
 			HDMI_PANEL_NAME, strnlen(HDMI_PANEL_NAME,
 				PANEL_NAME_MAX_LEN))) {
@@ -1356,12 +1213,6 @@ void __init msm8960_set_display_params(char *prim_panel, char *ext_panel)
 			set_mdp_clocks_for_wuxga();
 		}
 
-		if (!strncmp((char *)msm_fb_pdata.prim_panel_name,
-				MIPI_VIDEO_TOSHIBA_WUXGA_PANEL_NAME,
-				strnlen(MIPI_VIDEO_TOSHIBA_WUXGA_PANEL_NAME,
-					PANEL_NAME_MAX_LEN))) {
-			set_mdp_clocks_for_wuxga();
-		}
 	}
 	if (strnlen(ext_panel, PANEL_NAME_MAX_LEN)) {
 		strlcpy(msm_fb_pdata.ext_panel_name, ext_panel,

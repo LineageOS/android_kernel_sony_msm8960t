@@ -81,14 +81,14 @@ static void apds9702_report(struct apds9702data *data)
 	struct apds9702_platform_data *pdata = data->client->dev.platform_data;
 	int d = gpio_get_value(pdata->gpio_dout);
 	dev_dbg(&data->client->dev, "%s: gpio = %d\n", __func__, d);
-	input_report_abs(data->input_dev, ABS_DISTANCE,
-		d == DOUT_VALUE_IF_DETECTED ? 0 : 255);
+	input_event(data->input_dev, EV_MSC, MSC_RAW,
+		 d == DOUT_VALUE_IF_DETECTED ? 0 : 255);
 	input_sync(data->input_dev);
 }
 
 static int apds9702_do_sensing(struct apds9702data *data, int enable)
 {
-	int err = 0;
+	int err;
 	struct apds9702_platform_data *pdata = data->client->dev.platform_data;
 
 	dev_dbg(&data->client->dev, "%s: enable = %d\n", __func__, enable);
@@ -98,17 +98,15 @@ static int apds9702_do_sensing(struct apds9702data *data, int enable)
 						data->ctl_reg & 0xFF,
 						data->ctl_reg >> 8);
 		if (err)
-			pdata->hw_config(&data->client->dev, 0);
-		else {
-			data->active = 1;
-			apds9702_report(data);
-			return 0;
-		}
-	} else {
-		err = apds9702_write_byte(data->client, 0, 0);
-		pdata->hw_config(&data->client->dev, 0);
-		data->active = 0;
+			goto err_exit;
+		data->active = 1;
+		apds9702_report(data);
+		return 0;
 	}
+	err = apds9702_write_byte(data->client, 0, 0);
+	data->active = 0;
+err_exit:
+	pdata->hw_config(&data->client->dev, 0);
 	if (err)
 		dev_err(&data->client->dev, "%s. I2C write error = %d\n",
 			__func__, err);
@@ -120,7 +118,6 @@ static irqreturn_t apds9702_work(int irq, void *handle)
 	struct apds9702data *data = handle;
 
 	dev_dbg(&data->client->dev, "%s\n", __func__);
-
 	mutex_lock(&data->lock);
 	if (data->active)
 		apds9702_report(data);
@@ -156,7 +153,7 @@ static ssize_t attr_threshold_set(struct device *dev,
 	unsigned long th;
 	struct apds9702data *data = dev_get_drvdata(dev);
 
-	ret = strict_strtoul(buf, 10, &th);
+	ret = kstrtoul(buf, 10, &th);
 	if (!ret && th <= APDS9702_THRESH_MAX) {
 		mutex_lock(&data->lock);
 		data->ctl_reg = (data->ctl_reg &
@@ -184,7 +181,7 @@ static ssize_t attr_nburst_set(struct device *dev,
 	ssize_t ret;
 	unsigned long nb;
 	struct apds9702data *data = dev_get_drvdata(dev);
-	ret = strict_strtoul(buf, 10, &nb);
+	ret = kstrtoul(buf, 10, &nb);
 	if (!ret && nb <= APDS9702_NBURST_MAX) {
 		mutex_lock(&data->lock);
 		data->ctl_reg = (data->ctl_reg &
@@ -204,7 +201,7 @@ static ssize_t attr_freq_set(struct device *dev,
 	ssize_t ret;
 	unsigned long f;
 	struct apds9702data *data = dev_get_drvdata(dev);
-	ret = strict_strtoul(buf, 10, &f);
+	ret = kstrtoul(buf, 10, &f);
 	if (!ret && f <= APDS9702_FREQ_MAX) {
 		mutex_lock(&data->lock);
 		data->ctl_reg = (data->ctl_reg &
@@ -224,7 +221,7 @@ static ssize_t attr_duration_cycle_set(struct device *dev,
 	ssize_t ret;
 	unsigned long dc;
 	struct apds9702data *data = dev_get_drvdata(dev);
-	ret = strict_strtoul(buf, 10, &dc);
+	ret = kstrtoul(buf, 10, &dc);
 	if (!ret && dc <= APDS9702_DURATION_MAX) {
 		mutex_lock(&data->lock);
 		data->ctl_reg = (data->ctl_reg &
@@ -244,7 +241,7 @@ static ssize_t attr_rfilt_set(struct device *dev,
 	ssize_t ret;
 	unsigned long rf;
 	struct apds9702data *data = dev_get_drvdata(dev);
-	ret = strict_strtoul(buf, 10, &rf);
+	ret = kstrtoul(buf, 10, &rf);
 	if (!ret && rf <= APDS9702_RFILT_MAX) {
 		mutex_lock(&data->lock);
 		data->ctl_reg = (data->ctl_reg &
@@ -296,8 +293,9 @@ static int apds9702_device_open(struct input_dev *dev)
 	rc = apds9702_do_sensing(data, 1);
 	mutex_unlock(&data->lock);
 	if (rc)
-		dev_err(&data->client->dev, "%s. Failed to activate device,"
-			" err = %d\n",	__func__, rc);
+		dev_err(&data->client->dev,
+			"%s. Failed to activate device, err = %d\n",
+				__func__, rc);
 	return rc;
 }
 
@@ -309,8 +307,9 @@ static void apds9702_device_close(struct input_dev *dev)
 	rc = apds9702_do_sensing(data, 0);
 	mutex_unlock(&data->lock);
 	if (rc)
-		dev_err(&data->client->dev, "%s. Failed to deactivate device,"
-			" err = %d\n",	__func__, rc);
+		dev_err(&data->client->dev,
+			"%s. Failed to deactivate device, err = %d\n",
+				__func__, rc);
 }
 
 static int apds9702_probe(struct i2c_client *client,
@@ -335,8 +334,9 @@ static int apds9702_probe(struct i2c_client *client,
 	err = apds9702_write_byte(client, 0, 0);
 	pdata->hw_config(&client->dev, 0);
 	if (err) {
-		dev_err(&client->dev, "%s: device not responding"
-			" error = %d\n", __func__, err);
+		dev_err(&client->dev,
+				"%s: device not responding, error = %d\n",
+					__func__, err);
 		err = -ENODEV;
 		goto err_not_responding;
 	}
@@ -380,10 +380,8 @@ static int apds9702_probe(struct i2c_client *client,
 	data->input_dev->id.product = 1;
 	data->input_dev->id.version = 1;
 	data->input_dev->id.bustype = BUS_I2C;
-	set_bit(EV_ABS, data->input_dev->evbit);
-	set_bit(ABS_DISTANCE, data->input_dev->absbit);
-
-	input_set_abs_params(data->input_dev, ABS_DISTANCE, 0, 255, 0, 0);
+	set_bit(EV_MSC, data->input_dev->evbit);
+	set_bit(MSC_RAW, data->input_dev->mscbit);
 
 	err = input_register_device(data->input_dev);
 	if (err) {

@@ -1,4 +1,5 @@
 /* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,6 +9,9 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * NOTE: This file has been modified by Sony Mobile Communications AB.
+ * Modifications are licensed under the License.
  *
  */
 
@@ -1020,9 +1024,24 @@ static irqreturn_t hdmi_msm_isr(int irq, void *dev_id)
 		/*
 		 * Got HPD interrupt. Ack the interrupt and disable any
 		 * further HPD interrupts until we process this interrupt.
+		 * Got HPD interrupt.
 		 */
-		HDMI_OUTP(0x0254, ((hpd_int_ctrl | (BIT(0))) & ~BIT(2)));
 
+		if ((hpd_int_ctrl & (1 << 1))) {
+			/*
+			 *  Ack the interrupt and enable HPD interrupts
+			 *  to make sure to get disconnect interrupt
+			 */
+			HDMI_OUTP(0x0254,
+					((hpd_int_ctrl | BIT(0)) & ~BIT(1)));
+		} else {
+			/*
+			 *  Ack the interrupt and disable any HPD interrupts
+			 *  until we process this interrupt.
+			 */
+			HDMI_OUTP(0x0254,
+					((hpd_int_ctrl | BIT(0)) & ~BIT(2)));
+		}
 		external_common_state->hpd_state =
 			(HDMI_INP(0x0250) & BIT(1)) >> 1;
 		DEV_DBG("%s: Queuing work to handle HPD %s event\n", __func__,
@@ -2309,6 +2328,7 @@ static int hdcp_authentication_part1(void)
 {
 	int ret = 0;
 	boolean is_match;
+	bool stale_an = false;
 	boolean is_part1_done = FALSE;
 	uint32 timeout_count;
 	uint8 bcaps;
@@ -2364,6 +2384,13 @@ static int hdcp_authentication_part1(void)
 		 * before enabling HDCP. */
 		HDMI_OUTP(0x0288, qfprom_aksv_0);
 		HDMI_OUTP(0x0284, qfprom_aksv_1);
+
+		/* Check for link0_Status stale values for An ready bit */
+		if (HDMI_INP_ND(0x011C) & (BIT(8) | BIT(9))) {
+			DEV_WARN("%s: An ready even before enabling HDCP\n",
+				__func__);
+			stale_an = true;
+		}
 
 		msm_hdmi_init_ddc();
 
@@ -2432,16 +2459,48 @@ static int hdcp_authentication_part1(void)
 		/* enable all HDCP ints */
 		HDMI_OUTP(0x0118, (1 << 2) | (1 << 6) | (1 << 7));
 
+		/* Wait for HDCP keys to be checked and validated */
+		timeout_count = 100;
+		while ((((HDMI_INP(0x011C) >> 28) & 0x7) != 0x3) &&
+			timeout_count) {
+			DEV_DBG("%s: Keys not ready(%d)\n", __func__,
+				timeout_count);
+			timeout_count--;
+			msleep(20);
+		}
+
+		if (!timeout_count) {
+			DEV_ERR("%s: KEYS NOT READY\n", __func__);
+			/* three bits 28..30 */
+			hdcp_key_state((HDMI_INP(0x011C) >> 28) & 0x7);
+			goto error;
+		}
+
+		mutex_lock(&hdcp_auth_state_mutex);
+
+		/* 0x0168 HDCP_RCVPORT_DATA12
+		   [23:8] BSTATUS
+		   [7:0] BCAPS */
+		HDMI_OUTP(0x0168, bcaps);
+
+		/* Check for link0_Status stale values for An ready bit */
+		if (!(HDMI_INP_ND(0x011C) & (BIT(8) | BIT(9)))) {
+			DEV_DBG("%s: An not ready after enabling HDCP\n",
+				__func__);
+			stale_an = false;
+		}
+
 		/* 0x011C HDCP_LINK0_STATUS
 		[8] AN_0_READY
 		[9] AN_1_READY */
 		/* wait for an0 and an1 ready bits to be set in LINK0_STATUS */
-
-		mutex_lock(&hdcp_auth_state_mutex);
 		timeout_count = 100;
 		while (((HDMI_INP_ND(0x011C) & (0x3 << 8)) != (0x3 << 8))
-			&& timeout_count--)
+			&& timeout_count) {
 			msleep(20);
+			timeout_count--;
+		}
+
 		if (!timeout_count) {
 			ret = -ETIMEDOUT;
 			DEV_ERR("%s(%d): timedout, An0=%d, An1=%d\n",
@@ -2452,10 +2511,15 @@ static int hdcp_authentication_part1(void)
 			goto error;
 		}
 
-		/* 0x0168 HDCP_RCVPORT_DATA12
-		   [23:8] BSTATUS
-		   [7:0] BCAPS */
-		HDMI_OUTP(0x0168, bcaps);
+		/*
+		 * In cases where An_ready bits had stale values, it would be
+		 * better to delay reading of An to avoid any potential of this
+		 * read being blocked
+		 */
+		if (stale_an) {
+			msleep(200);
+			stale_an = false;
+		}
 
 		/* 0x014C HDCP_RCVPORT_DATA5
 		   [31:0] LINK0_AN_0 */
@@ -2467,9 +2531,6 @@ static int hdcp_authentication_part1(void)
 		/* read an1 calculation */
 		link0_an_1 = HDMI_INP(0x0150);
 		mutex_unlock(&hdcp_auth_state_mutex);
-
-		/* three bits 28..30 */
-		hdcp_key_state((HDMI_INP(0x011C) >> 28) & 0x7);
 
 		/* 0x0144 HDCP_RCVPORT_DATA3
 		[31:0] LINK0_AKSV_0 public key
@@ -3010,15 +3071,14 @@ static void hdmi_msm_hdcp_enable(void)
 	external_common_state->hdcp_active = TRUE;
 	mutex_unlock(&hdcp_auth_state_mutex);
 
-	if (!hdmi_msm_is_dvi_mode()) {
-		DEV_INFO("HDMI HPD: sense : send HDCP_PASS\n");
-		envp[0] = "HDCP_STATE=PASS";
-		envp[1] = NULL;
-		kobject_uevent_env(external_common_state->uevent_kobj,
-		    KOBJ_CHANGE, envp);
+	DEV_INFO("HDMI HPD: sense : send HDCP_PASS\n");
+	envp[0] = "HDCP_STATE=PASS";
+	envp[1] = NULL;
+	kobject_uevent_env(external_common_state->uevent_kobj,
+		KOBJ_CHANGE, envp);
 
+	if (!hdmi_msm_is_dvi_mode())
 		SWITCH_SET_HDMI_AUDIO(1, 0);
-	}
 
 	return;
 
@@ -3626,12 +3686,12 @@ static uint8 hdmi_msm_avi_iframe_lut[][17] = {
 	 0x10,	0x10,	0x10,	0x10,	0x10, 0x10, 0x10, 0x10}, /*00*/
 	/* Data Byte 02: C1 C0 M1 M0 R3 R2 R1 R0 */
 	{0x18,	0x18,	0x28,	0x28,	0x28,	 0x28,	0x28,	0x28,	0x28,
-	 0x28,	0x28,	0x28,	0x28,	0x18, 0x28, 0x18}, /*01*/
+	 0x28,	0x28,	0x28,	0x28,	0x18, 0x28, 0x18, 0x08}, /*01*/
 	/* Data Byte 03: ITC EC2 EC1 EC0 Q1 Q0 SC1 SC0 */
 	{0x00,	0x00,	0x00,	0x00,	0x00,	 0x00,	0x00,	0x00,	0x00,
 	 0x00,	0x00,	0x00,	0x00,	0x00, 0x00, 0x00, 0x00}, /*02*/
 	/* Data Byte 04: 0 VIC6 VIC5 VIC4 VIC3 VIC2 VIC1 VIC0 */
-	{0x02,	0x06,	0x11,	0x15,	0x04,	 0x13,	0x10,	0x05,	0x1F,
+	{0x02,	0x06,	0x12,	0x15,	0x04,	 0x13,	0x10,	0x05,	0x1F,
 	 0x14,	0x20,	0x22,	0x21,	0x01, 0x03, 0x11, 0x00}, /*03*/
 	/* Data Byte 05: 0 0 0 0 PR3 PR2 PR1 PR0 */
 	{0x00,	0x01,	0x00,	0x01,	0x00,	 0x00,	0x00,	0x00,	0x00,
@@ -4470,10 +4530,10 @@ static int hdmi_msm_power_off(struct platform_device *pdev)
 	int ret = 0;
 
 	/*
-	 * SoMC: don't check ::hpd_initialized here since user space may
-	 * turn off HPD via hdmi_msm_hpd_feature() before power off is
-	 * called which leads to HDCP hw lockup on the next power on
-	 */
+	don't check for hpd_initialized here since user space may
+	turn off HPD via hdmi_msm_hpd_feature() before power off is
+	called which leads to HDCP HW lockup on the next power on.
+	*/
 	if (!(MSM_HDMI_BASE && hdmi_msm_state &&
 			hdmi_msm_state->hdmi_app_clk)) {
 		DEV_ERR("%s: HDMI not initialized\n", __func__);
@@ -4964,39 +5024,6 @@ static void __exit hdmi_msm_exit(void)
 	platform_device_unregister(&this_device);
 	platform_driver_unregister(&this_driver);
 }
-
-/* SoMC: disabled for production due to security reasons */
-#if 0
-static int set_hdcp_feature_on(const char *val, const struct kernel_param *kp)
-{
-	int rv = param_set_bool(val, kp);
-
-	if (rv)
-		return rv;
-
-	pr_debug("%s: HDCP feature = %d\n", __func__, hdcp_feature_on);
-	if (hdmi_msm_state) {
-		if ((HDMI_INP(0x0250) & 0x2)) {
-			pr_err("%s: Unable to set HDCP feature", __func__);
-			pr_err("%s: HDMI panel is currently turned on",
-					__func__);
-		} else if (hdcp_feature_on != hdmi_msm_state->hdcp_enable) {
-			hdmi_msm_config_hdcp_feature();
-		}
-	}
-
-	return 0;
-}
-
-static struct kernel_param_ops hdcp_feature_on_param_ops = {
-	.set = set_hdcp_feature_on,
-	.get = param_get_bool,
-};
-
-module_param_cb(hdcp, &hdcp_feature_on_param_ops, &hdcp_feature_on,
-			S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(hdcp, "Enable or Disable HDCP");
-#endif
 
 module_init(hdmi_msm_init);
 module_exit(hdmi_msm_exit);
