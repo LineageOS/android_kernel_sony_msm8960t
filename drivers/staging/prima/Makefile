@@ -556,22 +556,22 @@ CDEFINES += -DWLAN_FEATURE_11W
 endif
 
 ifeq ($(CONFIG_ARCH_MSM8960),y)
-EXTRA_CFLAGS += -march=armv7-a
+# EXTRA_CFLAGS += -march=armv7-a
 CDEFINES += -DMSM_PLATFORM_8960
 endif
 
 ifeq ($(CONFIG_ARCH_MSM8X60),y)
-EXTRA_CFLAGS += -march=armv7-a
+# EXTRA_CFLAGS += -march=armv7-a
 CDEFINES += -DMSM_PLATFORM_8660
 endif
 
 ifeq ($(CONFIG_MACH_MSM7X30_SURF),y)
-EXTRA_CFLAGS += -march=armv7-a
+# EXTRA_CFLAGS += -march=armv7-a
 CDEFINES += -DMSM_PLATFORM_7x30
 endif
 
 ifeq ($(CONFIG_MACH_MSM7X27_SURF),y)
-EXTRA_CFLAGS += -march=armv6
+# EXTRA_CFLAGS += -march=armv6
 CDEFINES += -DMSM_PLATFORM_7x27
 endif
 

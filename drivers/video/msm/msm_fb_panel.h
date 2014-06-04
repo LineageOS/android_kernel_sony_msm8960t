@@ -186,6 +186,8 @@ struct msm_panel_info {
 	/* physical size in mm */
 	__u32 width;
 	__u32 height;
+	__u32 xres_aligned;
+	__u32 yres_aligned;
 };
 
 #define MSM_FB_SINGLE_MODE_PANEL(pinfo)		\

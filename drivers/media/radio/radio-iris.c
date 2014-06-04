@@ -1135,7 +1135,7 @@ static int hci_fm_get_ch_det_th(struct radio_hci_dev *hdev,
 	return radio_hci_send_cmd(hdev, opcode, 0, NULL);
 }
 
-static int radio_hci_err(__u16 code)
+static int radio_hci_err(__u32 code)
 {
 	switch (code) {
 	case 0:
@@ -2046,8 +2046,7 @@ static inline void hci_ev_tune_status(struct radio_hci_dev *hdev,
 
 	if (radio->fm_st_rsp.station_rsp.stereo_prg)
 		iris_q_event(radio, IRIS_EVT_STEREO);
-
-	if (radio->fm_st_rsp.station_rsp.mute_mode)
+	else if (radio->fm_st_rsp.station_rsp.stereo_prg == 0)
 		iris_q_event(radio, IRIS_EVT_MONO);
 
 	if (radio->fm_st_rsp.station_rsp.rds_sync_status)
@@ -2421,9 +2420,11 @@ static void hci_ev_af_list(struct radio_hci_dev *hdev,
 		FMDERR("AF list size received more than available size");
 		return;
 	}
-	memcpy(&ev.af_list[0], &skb->data[AF_LIST_OFFSET], ev.af_size);
+	memcpy(&ev.af_list[0], &skb->data[AF_LIST_OFFSET],
+					ev.af_size * sizeof(int));
 	iris_q_event(radio, IRIS_EVT_NEW_AF_LIST);
-	iris_q_evt_data(radio, (char *)&ev, sizeof(ev), IRIS_BUF_AF_LIST);
+	iris_q_evt_data(radio, (char *)&ev, (7 + ev.af_size * sizeof(int)),
+							IRIS_BUF_AF_LIST);
 }
 
 static void hci_ev_rds_lock_status(struct radio_hci_dev *hdev,
@@ -3010,7 +3011,7 @@ static int iris_vidioc_s_ext_ctrls(struct file *file, void *priv,
 			struct v4l2_ext_controls *ctrl)
 {
 	int retval = 0;
-	int bytes_to_copy;
+	size_t bytes_to_copy;
 	struct hci_fm_tx_ps tx_ps;
 	struct hci_fm_tx_rt tx_rt;
 	struct hci_fm_def_data_wr_req default_data;
@@ -3019,14 +3020,20 @@ static int iris_vidioc_s_ext_ctrls(struct file *file, void *priv,
 	struct iris_device *radio = video_get_drvdata(video_devdata(file));
 	char *data = NULL;
 
+	if ((ctrl == NULL) || (ctrl->controls == NULL)
+		|| (ctrl->count == 0)) {
+		retval = -EINVAL;
+		return retval;
+	}
+
 	switch ((ctrl->controls[0]).id) {
 	case V4L2_CID_RDS_TX_PS_NAME:
 		FMDBG("In V4L2_CID_RDS_TX_PS_NAME\n");
 		/*Pass a sample PS string */
 
 		memset(tx_ps.ps_data, 0, MAX_PS_LENGTH);
-		bytes_to_copy = min((int)(ctrl->controls[0]).size,
-			MAX_PS_LENGTH);
+		bytes_to_copy = min(ctrl->controls[0].size,
+			(size_t)MAX_PS_LENGTH);
 		data = (ctrl->controls[0]).string;
 
 		if (copy_from_user(tx_ps.ps_data,
@@ -3043,7 +3050,7 @@ static int iris_vidioc_s_ext_ctrls(struct file *file, void *priv,
 		break;
 	case V4L2_CID_RDS_TX_RADIO_TEXT:
 		bytes_to_copy =
-		    min((int)(ctrl->controls[0]).size, MAX_RT_LENGTH);
+		    min((ctrl->controls[0]).size, (size_t)MAX_RT_LENGTH);
 		data = (ctrl->controls[0]).string;
 
 		memset(tx_rt.rt_data, 0, MAX_RT_LENGTH);
@@ -3476,13 +3483,34 @@ static int iris_vidioc_s_ctrl(struct file *file, void *priv,
 		radio->riva_data_req.cmd_params.start_addr = ctrl->value;
 		break;
 	case V4L2_CID_PRIVATE_IRIS_RIVA_ACCS_LEN:
-		radio->riva_data_req.cmd_params.length = ctrl->value;
+		if ((ctrl->value > 0) &&
+			(ctrl->value <= MAX_RIVA_PEEK_RSP_SIZE)) {
+			radio->riva_data_req.cmd_params.length = ctrl->value;
+		} else {
+			FMDERR("Length %d is more than the buffer size %d\n",
+			ctrl->value, MAX_RIVA_PEEK_RSP_SIZE);
+			retval = -EINVAL;
+		}
 		break;
 	case V4L2_CID_PRIVATE_IRIS_RIVA_POKE:
-		memcpy(radio->riva_data_req.data, (void *)ctrl->value,
-					radio->riva_data_req.cmd_params.length);
-		radio->riva_data_req.cmd_params.subopcode = RIVA_POKE_OPCODE;
-		retval = hci_poke_data(&radio->riva_data_req , radio->fm_hdev);
+		if (radio->riva_data_req.cmd_params.length <= MAX_RIVA_PEEK_RSP_SIZE) {
+			retval = copy_from_user(radio->riva_data_req.data,
+						(void *)ctrl->value,
+						radio->riva_data_req.cmd_params.length);
+			if (retval == 0) {
+				radio->riva_data_req.cmd_params.subopcode =
+									RIVA_POKE_OPCODE;
+				retval = hci_poke_data(&radio->riva_data_req,
+							radio->fm_hdev);
+			} else {
+				retval = -EINVAL;
+			}
+		} else {
+			FMDERR("Can not copy into driver's buffer. Length %d is more than"
+			 "the buffer size %d\n", radio->riva_data_req.cmd_params.length,
+				MAX_RIVA_PEEK_RSP_SIZE);
+			retval = -EINVAL;
+		}
 		break;
 	case V4L2_CID_PRIVATE_IRIS_SSBI_ACCS_ADDR:
 		radio->ssbi_data_accs.start_addr = ctrl->value;
@@ -4126,6 +4154,7 @@ static int iris_vidioc_querycap(struct file *file, void *priv,
 	radio = video_get_drvdata(video_devdata(file));
 	strlcpy(capability->driver, DRIVER_NAME, sizeof(capability->driver));
 	strlcpy(capability->card, DRIVER_CARD, sizeof(capability->card));
+	capability->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO;
 	radio->g_cap = capability;
 	return 0;
 }
@@ -4213,11 +4242,11 @@ static int __init iris_probe(struct platform_device *pdev)
 		if (kfifo_alloc_rc != 0) {
 			FMDERR("failed allocating buffers %d\n",
 				   kfifo_alloc_rc);
-			for (; i > -1; i--) {
+			for (; i > -1; i--)
 				kfifo_free(&radio->data_buf[i]);
-				kfree(radio);
-				return -ENOMEM;
-			}
+			video_device_release(radio->videodev);
+			kfree(radio);
+			return -ENOMEM;
 		}
 	}
 
@@ -4245,8 +4274,17 @@ static int __init iris_probe(struct platform_device *pdev)
 	} else {
 		priv_videodev = kzalloc(sizeof(struct video_device),
 			GFP_KERNEL);
-		memcpy(priv_videodev, radio->videodev,
-			sizeof(struct video_device));
+		if (priv_videodev != NULL) {
+			memcpy(priv_videodev, radio->videodev,
+				sizeof(struct video_device));
+		} else {
+			video_unregister_device(radio->videodev);
+			video_device_release(radio->videodev);
+			for (; i > -1; i--)
+				kfifo_free(&radio->data_buf[i]);
+			kfree(radio);
+			return -ENOMEM;
+		}
 	}
 	return 0;
 }
