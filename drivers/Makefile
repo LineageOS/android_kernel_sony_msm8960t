@@ -145,3 +145,5 @@ obj-$(CONFIG_SENSORS)		+= sensors/
 obj-$(CONFIG_ESOC)		+= esoc/
 obj-$(CONFIG_RMI4_BUS)		+= rmi4/
 obj-$(CONFIG_CYPRESS_CYTTSP4_BUS)	+= ttsp/
+
+obj-$(CONFIG_ANDROID)		+= android/
