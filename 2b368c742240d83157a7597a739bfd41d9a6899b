@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "5faad753_79996a6c",
+        "filename": "arch/arm/configs/cm_viskan_huashan_defconfig",
+        "patchSetId": 6
+      },
+      "lineNbr": 1708,
+      "author": {
+        "id": 13589
+      },
+      "writtenOn": "2016-05-10T09:42:02Z",
+      "side": 1,
+      "message": "For future reference, CONFIG_VT has been restored due to unofficial replaced Huashan touchscreens not working properly without it.\n\nhttps://github.com/CyanogenMod/android_kernel_sony_msm8960t/commit/ec092af026df068fa19fd716b6ac796ced9af763",
+      "revId": "2b368c742240d83157a7597a739bfd41d9a6899b",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
