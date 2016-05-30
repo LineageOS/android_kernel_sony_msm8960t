@@ -202,16 +202,12 @@ static inline uint16_t msm_mpm_get_irq_a2m(struct irq_data *d)
 	hlist_for_each_entry(node, elem, &irq_hash[hashfn(d->hwirq)], node) {
 		if ((node->hwirq == d->hwirq)
 				&& (d->domain == node->domain)) {
-			/*
-			 * Update the linux irq mapping. No update required for
-			 * bypass interrupts
-			 */
-			if (node->pin != 0xff)
-				msm_mpm_irqs_m2a[node->pin] = d->irq;
+			/* Update the linux irq mapping */
+			msm_mpm_irqs_m2a[node->pin] = d->irq;
 			break;
 		}
 	}
-	return elem ? node->pin : 0;
+	return node ? node->pin : 0;
 }
 
 static int msm_mpm_enable_irq_exclusive(
@@ -376,7 +372,7 @@ int msm_mpm_enable_pin(unsigned int pin, unsigned int enable)
 	if (!msm_mpm_is_initialized())
 		return -EINVAL;
 
-	if (pin >= MSM_MPM_NR_MPM_IRQS)
+	if (pin > MSM_MPM_NR_MPM_IRQS)
 		return -EINVAL;
 
 	spin_lock_irqsave(&msm_mpm_lock, flags);
@@ -482,7 +478,6 @@ void msm_mpm_enter_sleep(uint32_t sclk_count, bool from_idle)
 void msm_mpm_exit_sleep(bool from_idle)
 {
 	unsigned long pending;
-	uint32_t *enabled_intr;
 	int i;
 	int k;
 
@@ -491,16 +486,12 @@ void msm_mpm_exit_sleep(bool from_idle)
 		return;
 	}
 
-	enabled_intr = from_idle ? msm_mpm_enabled_irq :
-						msm_mpm_wake_irq;
-
 	for (i = 0; i < MSM_MPM_REG_WIDTH; i++) {
 		pending = msm_mpm_read(MSM_MPM_REG_STATUS, i);
-		pending &= enabled_intr[i];
 
 		if (MSM_MPM_DEBUG_PENDING_IRQ & msm_mpm_debug_mask)
-			pr_info("%s: enabled_intr pending.%d: 0x%08x 0x%08lx\n",
-				__func__, i, enabled_intr[i], pending);
+			pr_info("%s: pending.%d: 0x%08lx", __func__,
+					i, pending);
 
 		k = find_first_bit(&pending, 32);
 		while (k < 32) {
@@ -574,8 +565,7 @@ static int __devinit msm_mpm_dev_probe(struct platform_device *pdev)
 		goto failed_irq_get;
 	}
 	ret = request_irq(dev->mpm_ipc_irq, msm_mpm_irq,
-			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, pdev->name,
-			msm_mpm_irq);
+			IRQF_TRIGGER_RISING, pdev->name, msm_mpm_irq);
 
 	if (ret) {
 		pr_info("%s(): request_irq failed errno: %d\n", __func__, ret);
@@ -741,7 +731,7 @@ void __init of_mpm_init(struct device_node *node)
 	return;
 
 failed_malloc:
-	for (i = 0; i < MSM_MPM_NR_IRQ_DOMAINS; i++) {
+	for (i = 0; i < MSM_MPM_NR_MPM_IRQS; i++) {
 		mpm_of_map[i].chip->irq_mask = NULL;
 		mpm_of_map[i].chip->irq_unmask = NULL;
 		mpm_of_map[i].chip->irq_disable = NULL;
