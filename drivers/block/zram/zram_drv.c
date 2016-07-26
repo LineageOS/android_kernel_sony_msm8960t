@@ -566,7 +566,7 @@ static int zram_decompress_page(struct zram *zram, char *mem, u32 index)
 	unsigned char *cmem;
 	struct zram_meta *meta = zram->meta;
 	unsigned long handle;
-	size_t size;
+	unsigned int size;
 
 	bit_spin_lock(ZRAM_ACCESS, &meta->table[index].value);
 	handle = meta->table[index].handle;
@@ -579,10 +579,14 @@ static int zram_decompress_page(struct zram *zram, char *mem, u32 index)
 	}
 
 	cmem = zs_map_object(meta->mem_pool, handle, ZS_MM_RO);
-	if (size == PAGE_SIZE)
+	if (size == PAGE_SIZE) {
 		copy_page(mem, cmem);
-	else
-		ret = zcomp_decompress(zram->comp, cmem, size, mem);
+	} else {
+		struct zcomp_strm *zstrm = zcomp_stream_get(zram->comp);
+
+		ret = zcomp_decompress(zstrm, cmem, size, mem);
+		zcomp_stream_put(zram->comp, zstrm);
+	}
 	zs_unmap_object(meta->mem_pool, handle);
 	bit_spin_unlock(ZRAM_ACCESS, &meta->table[index].value);
 
@@ -649,7 +653,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 			   int offset)
 {
 	int ret = 0;
-	size_t clen;
+	unsigned int clen;
 	unsigned long handle;
 	struct page *page;
 	unsigned char *user_mem, *cmem, *src, *uncmem = NULL;
@@ -700,7 +704,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 		goto out;
 	}
 
-	ret = zcomp_compress(zram->comp, zstrm, uncmem, &clen);
+	ret = zcomp_compress(zstrm, uncmem, &clen);
 	if (!is_partial_io(bvec)) {
 		kunmap_atomic(user_mem);
 		user_mem = NULL;
@@ -722,7 +726,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 	if (!handle) {
 		if (printk_timed_ratelimit(&zram_rs_time,
 					   ALLOC_ERROR_LOG_RATE_MS))
-			pr_err("Error allocating memory for compressed page: %u, size=%zu\n",
+			pr_err("Error allocating memory for compressed page: %u, size=%u\n",
 				index, clen);
 		ret = -ENOMEM;
 		goto out;
