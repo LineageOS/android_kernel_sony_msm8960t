@@ -1815,6 +1815,7 @@ void diagfwd_init(void)
 				driver->poolsize_hdlc : buf_tbl_size;
 	mutex_init(&driver->diag_hdlc_mutex);
 	mutex_init(&driver->diag_cntl_mutex);
+	mutex_init(&driver->cmd_reg_mutex);
 
 	success = diag_smd_constructor(&driver->smd_data[MODEM_DATA],
 					MODEM_DATA, SMD_DATA_TYPE);
