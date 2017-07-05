@@ -151,6 +151,7 @@ struct as3665_audio {
 	u8		buf_gain;
 	u8		agc_ctrl;
 	u8		agc_time;
+	u32		music;
 };
 
 struct as3665_led {
@@ -854,6 +855,34 @@ fail:
 	return len;
 }
 
+static ssize_t show_audio_music(struct device *dev,
+			    struct device_attribute *attr,
+			    char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_audio *audio = &chip->audio;
+
+	return scnprintf(buf, PAGE_SIZE, "%x\n", audio->music);
+}
+
+static ssize_t store_audio_music(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t len)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_audio *audio = &chip->audio;
+	unsigned long music;
+
+	if (kstrtoul(buf, 16, &music))
+		return -EINVAL;
+
+	audio->music = music;
+
+	return len;
+}
+
 static ssize_t show_max_current(struct device *dev,
 			    struct device_attribute *attr,
 			    char *buf)
@@ -989,6 +1018,8 @@ static DEVICE_ATTR(audio_agc_ctrl, S_IRUGO | S_IWUSR,
 		   show_audio_agc_ctrl, store_audio_agc_ctrl);
 static DEVICE_ATTR(audio_agc_time, S_IRUGO | S_IWUSR,
 		   show_audio_agc_time, store_audio_agc_time);
+static DEVICE_ATTR(audio_music, S_IRUGO | S_IWUSR,
+		   show_audio_music, store_audio_music);
 
 static struct attribute *as3665_attributes[] = {
 	&dev_attr_sequencer1_mode.attr,
@@ -1010,6 +1041,7 @@ static struct attribute *as3665_audio_attributes[] = {
 	&dev_attr_audio_buf_gain.attr,
 	&dev_attr_audio_agc_ctrl.attr,
 	&dev_attr_audio_agc_time.attr,
+	&dev_attr_audio_music.attr,
 	NULL
 };
 
