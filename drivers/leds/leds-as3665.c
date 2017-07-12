@@ -139,6 +139,9 @@
 #define AS3665_SEQ_STATUS_MASK			0x07 /* 00000111 */
 #define SHIFT_MASK(id)				(((id) - 1) * 2)
 
+#define AS3665_EFFECTS_MUSIC_MODE_MUSIC(p)       (p->lights_effects != 0)
+#define AS3665_EFFECTS_MUSIC_PROGRAM             "0021219d009c219ca340009d8089aa8f0a906e94008a2295018c429d80400014009dc090009b0a8a128c2240008a1284629d80900088249a32846214009dc08e0a8a2fa00501ff004901b6"
+
 struct as3665_sequencer {
 	int		id;
 	u8		mode;
@@ -151,6 +154,14 @@ struct as3665_audio {
 	u8		buf_gain;
 	u8		agc_ctrl;
 	u8		agc_time;
+};
+
+struct as3665_effects {
+	u32		lights_effects;
+	char		save_load[(AS3665_PROGRAM_LENGTH + 3)];
+	u8		save_load_len;
+	u8		save_sequencer_mode;
+	u8		save_sequencer_run_mode;
 };
 
 struct as3665_led {
@@ -175,6 +186,7 @@ struct as3665_chip {
 	u8			num_channels;
 	u8			num_leds;
 	u8			enable;
+	struct as3665_effects	effects;
 };
 
 static inline struct as3665_led *cdev_to_led(struct led_classdev *cdev)
@@ -464,12 +476,17 @@ static void as3665_set_brightness(struct led_classdev *cdev,
 {
 	struct as3665_led *led = cdev_to_led(cdev);
 	struct as3665_chip *chip = led_to_as3665(led);
+	struct as3665_effects *effects = &chip->effects;
 	struct i2c_client *client = chip->client;
 	int ret = 0;
 
 	mutex_lock(&chip->lock);
 
 	led->brightness = (u8)brightness;
+	if (AS3665_EFFECTS_MUSIC_MODE_MUSIC(effects)) {
+		goto fail;
+	}
+
 	if (brightness)
 		as3665_chipen_check(client);
 
@@ -529,6 +546,19 @@ static ssize_t store_sequencer_load(struct device *dev,
 				     const char *buf, size_t len)
 {
 	struct i2c_client *client = to_i2c_client(dev);
+	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_effects *effects = &chip->effects;
+
+	if (len < (AS3665_PROGRAM_LENGTH + 3)) {
+		strncpy(effects->save_load, buf, len);
+		effects->save_load[len] = '\0';
+		effects->save_load_len = len;
+	}
+
+	if (AS3665_EFFECTS_MUSIC_MODE_MUSIC(effects)) {
+		return len;
+	}
+
 	return as3665_do_store_load(client, buf, len);
 }
 
@@ -568,7 +598,18 @@ static ssize_t store_sequencer_mode(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_effects *effects = &chip->effects;
 	struct as3665_sequencer *sequencer = &chip->sequencers[nr - 1];
+
+	if (AS3665_EFFECTS_MUSIC_MODE_MUSIC(effects)) {
+		if (!strncmp(buf, "run", 3))
+			effects->save_sequencer_mode = AS3665_CMD_RUN;
+		else if (!strncmp(buf, "reload", 6))
+			effects->save_sequencer_mode = AS3665_CMD_RELOAD;
+		else if (!strncmp(buf, "disabled", 8))
+			effects->save_sequencer_mode = AS3665_CMD_DISABLED;
+		return len;
+	}
 
 	mutex_lock(&chip->lock);
 
@@ -633,7 +674,20 @@ static ssize_t store_sequencer_run_mode(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_effects *effects = &chip->effects;
 	struct as3665_sequencer *sequencer = &chip->sequencers[nr - 1];
+
+	if (AS3665_EFFECTS_MUSIC_MODE_MUSIC(effects)) {
+		if (!strncmp(buf, "hold", 4))
+			effects->save_sequencer_run_mode = AS3665_CMD_HOLD;
+		else if (!strncmp(buf, "step", 4))
+			effects->save_sequencer_run_mode = AS3665_CMD_STEP;
+		else if (!strncmp(buf, "run", 3))
+			effects->save_sequencer_run_mode = AS3665_CMD_RUN;
+		else if (!strncmp(buf, "step_in_place", 13))
+			effects->save_sequencer_run_mode = AS3665_CMD_STEP_IN_PLACE;
+		return len;
+	}
 
 	mutex_lock(&chip->lock);
 
@@ -934,6 +988,7 @@ static ssize_t store_current(struct device *dev,
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct as3665_led *led = cdev_to_led(led_cdev);
 	struct as3665_chip *chip = led_to_as3665(led);
+	struct as3665_effects *effects = &chip->effects;
 	ssize_t ret = 0;
 	unsigned long curr;
 
@@ -943,10 +998,12 @@ static ssize_t store_current(struct device *dev,
 	if (curr > 0xFF)
 		return -EINVAL;
 
-	ret = set_current_internal(led, chip, curr);
+	if (!AS3665_EFFECTS_MUSIC_MODE_MUSIC(effects)) {
+		ret = set_current_internal(led, chip, curr);
 
-	if (ret < 0)
-		return ret;
+		if (ret < 0)
+			return ret;
+	}
 
 	led->led_current = (u8)curr;
 
@@ -1028,6 +1085,97 @@ static struct attribute_group as3665_led_attribute_group = {
 	.attrs = as3665_led_attributes
 };
 
+static ssize_t show_lights_effects(struct device *dev,
+			    struct device_attribute *attr,
+			    char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_effects *effects = &chip->effects;
+
+	return scnprintf(buf, PAGE_SIZE, "%x\n", effects->lights_effects);
+}
+
+static ssize_t store_lights_effects(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t len)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct as3665_chip *chip = i2c_get_clientdata(client);
+	struct as3665_effects *effects = &chip->effects;
+	struct as3665_sequencer *sequencer = &chip->sequencers[0];
+	struct as3665_led* led;
+	unsigned long lights_effects;
+	u8 led_current;
+	u8 led_rgb[3];
+	int i;
+
+	if (kstrtoul(buf, 16, &lights_effects))
+		return -EINVAL;
+
+	if (effects->lights_effects == lights_effects) {
+		return len;
+	}
+
+	effects->lights_effects = lights_effects;
+
+	if (AS3665_EFFECTS_MUSIC_MODE_MUSIC(effects)) {
+		effects->save_sequencer_mode = sequencer->mode;
+		effects->save_sequencer_run_mode = sequencer->run_mode;
+		as3665_set_sequencer_run_mode(sequencer, AS3665_CMD_HOLD);
+		as3665_set_sequencer_mode(sequencer, AS3665_CMD_DISABLED);
+		as3665_do_store_load(client, AS3665_EFFECTS_MUSIC_PROGRAM,
+				sizeof(AS3665_EFFECTS_MUSIC_PROGRAM));
+		as3665_set_sequencer_run_mode(sequencer, AS3665_CMD_RUN);
+		as3665_set_sequencer_mode(sequencer, AS3665_CMD_RELOAD);
+
+		led_rgb[0] = (lights_effects >> 16) & 0xFF;
+		led_rgb[1] = (lights_effects >> 8) & 0xFF;
+		led_rgb[2] = lights_effects & 0xFF;
+
+		for (i = 0; i < chip->num_leds; ++i) {
+			led = &chip->leds[i];
+			switch (led->color_id) {
+				case 'R':
+					led_current = led_rgb[0];
+					break;
+				case 'G':
+					led_current = led_rgb[1];
+					break;
+				case 'B':
+					led_current = led_rgb[2];
+					break;
+				default:
+					led_current = 0;
+					break;
+			}
+			if (led_current > 0) {
+				led_current = ((u16)led_current * led->effects_current) / 0xFF;
+			}
+			set_current_internal(led, chip, led_current);
+		}
+	} else {
+		if (effects->save_load_len > 0) {
+			as3665_do_store_load(client, effects->save_load, effects->save_load_len);
+			as3665_set_sequencer_run_mode(sequencer, effects->save_sequencer_run_mode);
+			as3665_set_sequencer_mode(sequencer, effects->save_sequencer_mode);
+		} else {
+			as3665_set_sequencer_run_mode(sequencer, AS3665_CMD_HOLD);
+			as3665_set_sequencer_mode(sequencer, AS3665_CMD_DISABLED);
+		}
+		effects->save_load[0] = '\0';
+		effects->save_load_len = 0;
+
+		for (i = 0; i < chip->num_leds; ++i) {
+			led = &chip->leds[i];
+			set_current_internal(led, chip, led->led_current);
+			as3665_set_brightness(&led->cdev, led->brightness);
+		}
+	}
+
+	return len;
+}
+
 /* device attributes */
 static DEVICE_ATTR(sequencer1_mode, S_IRUGO | S_IWUSR,
 		   show_sequencer1_mode, store_sequencer1_mode);
@@ -1050,6 +1198,8 @@ static DEVICE_ATTR(audio_agc_ctrl, S_IRUGO | S_IWUSR,
 		   show_audio_agc_ctrl, store_audio_agc_ctrl);
 static DEVICE_ATTR(audio_agc_time, S_IRUGO | S_IWUSR,
 		   show_audio_agc_time, store_audio_agc_time);
+static DEVICE_ATTR(lights_effects, S_IRUGO | S_IWUSR,
+		   show_lights_effects, store_lights_effects);
 
 static struct attribute *as3665_attributes[] = {
 	&dev_attr_sequencer1_mode.attr,
@@ -1071,6 +1221,7 @@ static struct attribute *as3665_audio_attributes[] = {
 	&dev_attr_audio_buf_gain.attr,
 	&dev_attr_audio_agc_ctrl.attr,
 	&dev_attr_audio_agc_time.attr,
+	&dev_attr_lights_effects.attr,
 	NULL
 };
 
@@ -1259,6 +1410,13 @@ static int as3665_probe(struct i2c_client *client,
 		dev_err(&client->dev, "error configuring chip\n");
 		goto fail3;
 	}
+
+	/* Initialize effects */
+	chip->effects.lights_effects = 0;
+	chip->effects.save_load[0] = '\0';
+	chip->effects.save_load_len = 0;
+	chip->effects.save_sequencer_mode = AS3665_CMD_DISABLED;
+	chip->effects.save_sequencer_run_mode = AS3665_CMD_HOLD;
 
 	/* Initialize leds */
 	chip->num_channels = pdata->num_channels;
