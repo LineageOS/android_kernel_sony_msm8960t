@@ -161,6 +161,8 @@ struct as3665_led {
 	u8			startup_current;
 	struct led_classdev     cdev;
 	u8			brightness;
+	u8			color_id;
+	u8			effects_current;
 };
 
 struct as3665_chip {
@@ -951,15 +953,74 @@ static ssize_t store_current(struct device *dev,
 	return len;
 }
 
+static ssize_t show_color_id(struct device *dev,
+			    struct device_attribute *attr,
+			    char *buf)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct as3665_led *led = cdev_to_led(led_cdev);
+
+	return scnprintf(buf, PAGE_SIZE, "%c\n", led->color_id);
+}
+
+static ssize_t store_color_id(struct device *dev,
+			     struct device_attribute *attr,
+			     const char *buf, size_t len)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct as3665_led *led = cdev_to_led(led_cdev);
+
+	if (len > 0) {
+		led->color_id = (u8)buf[0];
+	}
+
+	return len;
+}
+
+static ssize_t show_effects_current(struct device *dev,
+			    struct device_attribute *attr,
+			    char *buf)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct as3665_led *led = cdev_to_led(led_cdev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", led->effects_current);
+}
+
+static ssize_t store_effects_current(struct device *dev,
+			     struct device_attribute *attr,
+			     const char *buf, size_t len)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct as3665_led *led = cdev_to_led(led_cdev);
+	unsigned long curr;
+
+	if (kstrtoul(buf, 10, &curr))
+		return -EINVAL;
+
+	if (curr > 0xFF)
+		return -EINVAL;
+
+	led->effects_current = (u8)curr;
+
+	return len;
+}
+
 /* led class device attributes */
 static DEVICE_ATTR(led_current, S_IRUGO
 			| S_IWUSR, show_current, store_current);
 static DEVICE_ATTR(max_current, S_IRUGO
 			| S_IWUSR, show_max_current, store_max_current);
+static DEVICE_ATTR(color_id, S_IRUGO
+			| S_IWUSR, show_color_id, store_color_id);
+static DEVICE_ATTR(effects_current, S_IRUGO
+			| S_IWUSR, show_effects_current, store_effects_current);
 
 static struct attribute *as3665_led_attributes[] = {
 	&dev_attr_led_current.attr,
 	&dev_attr_max_current.attr,
+	&dev_attr_color_id.attr,
+	&dev_attr_effects_current.attr,
 	NULL,
 };
 
@@ -1092,8 +1153,10 @@ static int __init as3665_init_led(struct as3665_led *led, struct device *dev,
 
 	led->led_current = pdata->led_config[chan].led_current;
 	led->max_current = pdata->led_config[chan].max_current;
+	led->effects_current = pdata->led_config[chan].led_current;
 	led->startup_current = pdata->led_config[chan].startup_current;
 	led->chan_nr = pdata->led_config[chan].chan_nr;
+	led->color_id = 0;
 
 	if (led->chan_nr >= AS3665_LEDS) {
 		dev_err(dev, "Use channel numbers between 0 and %d\n",
