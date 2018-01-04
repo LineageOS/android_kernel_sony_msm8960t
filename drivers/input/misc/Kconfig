@@ -628,15 +628,6 @@ config INPUT_XEN_KBDDEV_FRONTEND
 	  To compile this driver as a module, choose M here: the
 	  module will be called xen-kbdfront.
 
-config PMIC8XXX_FORCECRASH
-       boolean "PMIC8XXX power key forcecrash support"
-       default n
-       depends on INPUT_PMIC8XXX_PWRKEY && (ARCH_MSM8X60 || ARCH_MSM8960)
-       help
-         Say Y here if you want support forcecrash functionality through
-         PMIC8XXX power key. Triggers panic if power key is hold for more
-         than 10secs.
-
 config PMIC8058_OTHC
         tristate "Qualcomm PMIC8058 OTHC support"
         default n
