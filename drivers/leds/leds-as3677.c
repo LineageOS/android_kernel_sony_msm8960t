@@ -2570,11 +2570,12 @@ static int as3677_configure(struct i2c_client *client,
 
 	for (i = 0; i < 6; i++) {
 		struct as3677_led *led = &data->leds[i];
+		u8 startup_brightness =
+			led->pled->startup_current_uA * 255 /
+			led->pled->max_current_uA;
 		if (led->pled->startup_current_uA) {
-			as3677_set_brightness(data, led,
-				led->pled->startup_current_uA * 255 /
-				led->pled->max_current_uA);
-
+			as3677_set_brightness(data, led, startup_brightness);
+			led->ldev.brightness = startup_brightness;
 		}
 	}
 	return 0;
