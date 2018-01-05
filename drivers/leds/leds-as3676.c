@@ -2658,11 +2658,12 @@ static int as3676_configure(struct i2c_client *client,
 
 	for (i = 0; i < ARRAY_SIZE(data->leds); i++) {
 		struct as3676_led *led = &data->leds[i];
+		u8 startup_brightness =
+			led->pled->startup_current_uA * 255 /
+			led->pled->max_current_uA;
 		if (led->pled->startup_current_uA) {
-			as3676_set_brightness(data, led,
-				led->pled->startup_current_uA * 255 /
-				led->pled->max_current_uA);
-
+			as3676_set_brightness(data, led, startup_brightness);
+			led->ldev.brightness = startup_brightness;
 		}
 	}
 	return 0;
