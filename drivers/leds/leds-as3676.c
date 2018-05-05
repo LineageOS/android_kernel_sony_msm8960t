@@ -42,6 +42,10 @@
 #include <linux/slab.h>
 #include <linux/leds-as3676.h>
 
+#ifdef CONFIG_FB
+#include <linux/fb.h>
+#endif
+
 /* Current group check function is too strict in some cases.
    Setting this define to 0 disables them */
 #define AS3676_ENABLE_GROUP_CHECK 0
@@ -216,6 +220,10 @@ struct as3676_data {
 	int dls_users;
 	u8 adc_als_empty;
 	s32 adc_als_last;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	bool fb_suspended;
+#endif
 };
 
 struct as3676_als_group {
@@ -2550,6 +2558,83 @@ static struct device_attribute as3676_led_attributes[] = {
 	__ATTR_NULL
 };
 
+#ifdef CONFIG_FB
+static void as3676_fb_suspend(struct as3676_data *data)
+{
+	struct device *dev = &data->client->dev;
+	int i;
+
+	if (data->fb_suspended)
+		return;
+
+	dev_info(dev, "%s\n", __func__);
+
+	for (i = 0; i < 6; i++) {
+		struct as3676_led *led = &data->leds[i];
+		if (led->pled->startup_current_uA && led->pled->fb_backlight) {
+			as3676_set_brightness(data, led, 0);
+		}
+	}
+
+	data->fb_suspended = true;
+}
+
+static void as3676_fb_resume(struct as3676_data *data)
+{
+	struct device *dev = &data->client->dev;
+	int i;
+
+	if (!data->fb_suspended)
+		return;
+
+	dev_info(dev, "%s\n", __func__);
+
+	for (i = 0; i < 6; i++) {
+		struct as3676_led *led = &data->leds[i];
+		if (led->pled->startup_current_uA && led->pled->fb_backlight) {
+			as3676_set_brightness(data, led, led->ldev.brightness);
+		}
+	}
+
+	data->fb_suspended = false;
+}
+
+static int as3676_fb_notifier_callback(struct notifier_block *self,
+		unsigned long event, void *fbdata)
+{
+	struct fb_event *evdata = fbdata;
+	int *blank;
+	struct as3676_data *data = container_of(self,
+			struct as3676_data, fb_notifier);
+
+	if (evdata && evdata->data) {
+		if (event == FB_EVENT_BLANK) {
+			blank = evdata->data;
+			if (*blank == FB_BLANK_UNBLANK)
+				as3676_fb_resume(data);
+			else if (*blank == FB_BLANK_POWERDOWN)
+				as3676_fb_suspend(data);
+		}
+	}
+
+	return 0;
+}
+
+void as3676_fb_backlight_setup(struct device *dev,
+		struct as3676_data *data)
+{
+	data->fb_suspended = false;
+	data->fb_notifier.notifier_call = as3676_fb_notifier_callback;
+
+	if (fb_register_client(&data->fb_notifier)) {
+		dev_warn(dev, "%s: Failed to register fb_notifier\n", __func__);
+		return;
+	}
+
+	dev_info(dev, "%s: Registered fb_notifier\n", __func__);
+}
+#endif
+
 static int as3676_configure(struct i2c_client *client,
 		struct as3676_data *data, struct as3676_platform_data *pdata)
 {
@@ -2666,6 +2751,11 @@ static int as3676_configure(struct i2c_client *client,
 			led->ldev.brightness = startup_brightness;
 		}
 	}
+
+#ifdef CONFIG_FB
+	as3676_fb_backlight_setup(&client->dev, data);
+#endif
+
 	return 0;
 
 exit:
@@ -2771,6 +2861,10 @@ static int as3676_remove(struct i2c_client *client)
 		led_classdev_unregister(&led->ldev);
 	}
 	device_remove_attributes(&client->dev, as3676_attributes);
+
+#ifdef CONFIG_FB
+	fb_unregister_client(&data->fb_notifier);
+#endif
 
 	kfree(data);
 	i2c_set_clientdata(client, NULL);

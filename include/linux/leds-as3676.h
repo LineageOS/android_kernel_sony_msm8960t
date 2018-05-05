@@ -20,6 +20,9 @@ struct as3676_platform_led {
 	u32 startup_current_uA; /* On driver load this brightness will be set,
 				   useful for early backlight, etc. */
 	bool use_dls;
+#ifdef CONFIG_FB
+	bool fb_backlight; /* If this led controls a display backlight */
+#endif
 };
 
 struct as3676_platform_data {
