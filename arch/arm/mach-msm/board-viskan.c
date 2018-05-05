@@ -2914,12 +2914,14 @@ struct as3677_platform_data as3677_pdata = {
 		.on_charge_pump = 0,
 		.max_current_uA = 20000,
 		.startup_current_uA = 5000,
+		.fb_backlight = true,
 	},
 	.leds[1] = {
 		.name = "lcd-backlight2",
 		.on_charge_pump = 0,
 		.max_current_uA = 20000,
 		.startup_current_uA = 5000,
+		.fb_backlight = true,
 	},
 };
 #endif
