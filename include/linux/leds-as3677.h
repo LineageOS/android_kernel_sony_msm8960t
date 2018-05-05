@@ -25,6 +25,9 @@ struct as3677_platform_led {
 	u32 max_current_uA; /* This leds maximum current in uA */
 	u32 startup_current_uA; /* On driver load this brightness will be set,
 				   useful for early backlight, etc. */
+#ifdef CONFIG_FB
+	bool fb_backlight; /* If this led controls a display backlight */
+#endif
 };
 
 struct as3677_platform_data {
