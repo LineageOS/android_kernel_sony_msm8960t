@@ -304,12 +304,12 @@ bool zcomp_set_max_streams(struct zcomp *comp, int num_strm)
 	return comp->set_max_streams(comp, num_strm);
 }
 
-struct zcomp_strm *zcomp_strm_find(struct zcomp *comp)
+struct zcomp_strm *zcomp_stream_get(struct zcomp *comp)
 {
 	return comp->strm_find(comp);
 }
 
-void zcomp_strm_release(struct zcomp *comp, struct zcomp_strm *zstrm)
+void zcomp_stream_put(struct zcomp *comp, struct zcomp_strm *zstrm)
 {
 	comp->strm_release(comp, zstrm);
 }

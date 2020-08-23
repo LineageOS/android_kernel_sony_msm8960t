@@ -674,7 +674,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 			goto out;
 	}
 
-	zstrm = zcomp_strm_find(zram->comp);
+	zstrm = zcomp_stream_get(zram->comp);
 	user_mem = kmap_atomic(page);
 
 	if (is_partial_io(bvec)) {
@@ -747,7 +747,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 		memcpy(cmem, src, clen);
 	}
 
-	zcomp_strm_release(zram->comp, zstrm);
+	zcomp_stream_put(zram->comp, zstrm);
 	zstrm = NULL;
 	zs_unmap_object(meta->mem_pool, handle);
 
@@ -767,7 +767,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 	atomic64_inc(&zram->stats.pages_stored);
 out:
 	if (zstrm)
-		zcomp_strm_release(zram->comp, zstrm);
+		zcomp_stream_put(zram->comp, zstrm);
 	if (is_partial_io(bvec))
 		kfree(uncmem);
 	return ret;
