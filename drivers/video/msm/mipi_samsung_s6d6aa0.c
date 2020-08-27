@@ -65,7 +65,9 @@ static void mipi_dsi_panel_esd_failed_check(struct mipi_dsi_data *dsi_data)
 
 	dev_dbg(dev, "%s: enter...", __func__);
 
+#ifdef CONFIG_DEBUG_FS
 	mutex_lock(&mipi_dsi_panel_mfd->power_lock);
+#endif
 	/*if the panel was power off, it's no need to check ESD failed*/
 	if (!mipi_dsi_panel_mfd->panel_power_state)
 		goto unlock_exit;
@@ -74,7 +76,10 @@ static void mipi_dsi_panel_esd_failed_check(struct mipi_dsi_data *dsi_data)
 	mipi_dsi_clk_toggle(mipi_dsi_panel_mfd);
 
 unlock_exit:
+#ifdef CONFIG_DEBUG_FS
 	mutex_unlock(&mipi_dsi_panel_mfd->power_lock);
+#endif
+	return;
 }
 
 static void panel_esd_start_check(struct mipi_dsi_data *dsi_data)

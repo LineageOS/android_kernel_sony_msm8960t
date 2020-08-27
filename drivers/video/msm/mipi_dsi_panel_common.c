@@ -524,10 +524,14 @@ int prepare_for_reg_access(struct msm_fb_data_type *mfd)
 #endif
 	/* Needed to make sure the display stack isn't powered on/off while */
 	/* we are executing. Also locks in msm_fb.c */
+#ifdef CONFIG_DEBUG_FS
 	mutex_lock(&mfd->power_lock);
+#endif
 	if (mdp_fb_is_power_off(mfd)) {
 		dev_err(dev, "%s: panel is OFF, not supported\n", __func__);
+#ifdef CONFIG_DEBUG_FS
 		mutex_unlock(&mfd->power_lock);
+#endif
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
 		mutex_unlock(&mfd->nvrw_prohibit_draw);
 #endif
@@ -562,7 +566,9 @@ void post_reg_access(struct msm_fb_data_type *mfd)
 		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 	}
 	mutex_unlock(&mfd->dma->ov_mutex);
+#ifdef CONFIG_DEBUG_FS
 	mutex_unlock(&mfd->power_lock);
+#endif
 #ifdef CONFIG_FB_MSM_RECOVER_PANEL
 	mutex_unlock(&mfd->nvrw_prohibit_draw);
 #endif
