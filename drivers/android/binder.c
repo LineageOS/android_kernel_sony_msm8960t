@@ -51,6 +51,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <asm/cacheflush.h>
 #include <linux/fdtable.h>
 #include <linux/file.h>
 #include <linux/freezer.h>
@@ -63,19 +64,16 @@
 #include <linux/poll.h>
 #include <linux/debugfs.h>
 #include <linux/rbtree.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/pid_namespace.h>
 #include <linux/security.h>
 #include <linux/spinlock.h>
 #include <linux/ratelimit.h>
+#include <linux/types.h>
 
 #include <uapi/linux/android/binder.h>
-#include <uapi/linux/sched/types.h>
-
-#include <asm/cacheflush.h>
 
 #include "binder_alloc.h"
 #include "binder_trace.h"
@@ -150,7 +148,7 @@ static DECLARE_WAIT_QUEUE_HEAD(binder_user_error_wait);
 static int binder_stop_on_user_error;
 
 static int binder_set_stop_on_user_error(const char *val,
-					 const struct kernel_param *kp)
+					 struct kernel_param *kp)
 {
 	int ret;
 
@@ -4779,7 +4777,7 @@ static int binder_thread_release(struct binder_proc *proc,
 	 */
 	if ((thread->looper & BINDER_LOOPER_STATE_POLL) &&
 	    waitqueue_active(&thread->wait)) {
-		wake_up_poll(&thread->wait, EPOLLHUP | POLLFREE);
+		wake_up_poll(&thread->wait, POLLHUP | POLLFREE);
 	}
 
 	binder_inner_proc_unlock(thread->proc);
@@ -4800,7 +4798,7 @@ static int binder_thread_release(struct binder_proc *proc,
 	return active_transactions;
 }
 
-static __poll_t binder_poll(struct file *filp,
+static unsigned int binder_poll(struct file *filp,
 				struct poll_table_struct *wait)
 {
 	struct binder_proc *proc = filp->private_data;
@@ -4820,7 +4818,7 @@ static __poll_t binder_poll(struct file *filp,
 	poll_wait(filp, &thread->wait, wait);
 
 	if (binder_has_work(thread, wait_for_proc_work))
-		return EPOLLIN;
+		return POLLIN;
 
 	return 0;
 }
@@ -5158,7 +5156,7 @@ static void binder_vma_close(struct vm_area_struct *vma)
 	binder_defer_work(proc, BINDER_DEFERRED_PUT_FILES);
 }
 
-static vm_fault_t binder_vm_fault(struct vm_fault *vmf)
+static int binder_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	return VM_FAULT_SIGBUS;
 }
@@ -5316,6 +5314,7 @@ static int binder_release(struct inode *nodp, struct file *filp)
 static int binder_node_release(struct binder_node *node, int refs)
 {
 	struct binder_ref *ref;
+	struct hlist_node *pos;
 	int death = 0;
 	struct binder_proc *proc = node->proc;
 
@@ -5345,7 +5344,7 @@ static int binder_node_release(struct binder_node *node, int refs)
 	hlist_add_head(&node->dead_node, &binder_dead_nodes);
 	spin_unlock(&binder_dead_nodes_lock);
 
-	hlist_for_each_entry(ref, &node->refs, node_entry) {
+	hlist_for_each_entry(ref, pos, &node->refs, node_entry) {
 		refs++;
 		/*
 		 * Need the node lock to synchronize
@@ -5649,10 +5648,11 @@ static void print_binder_node_nilocked(struct seq_file *m,
 {
 	struct binder_ref *ref;
 	struct binder_work *w;
+	struct hlist_node *pos;
 	int count;
 
 	count = 0;
-	hlist_for_each_entry(ref, &node->refs, node_entry)
+	hlist_for_each_entry(ref, pos, &node->refs, node_entry)
 		count++;
 
 	seq_printf(m, "  node %d: u%016llx c%016llx pri %d:%d hs %d hw %d ls %d lw %d is %d iw %d tr %d",
@@ -5663,7 +5663,7 @@ static void print_binder_node_nilocked(struct seq_file *m,
 		   node->internal_strong_refs, count, node->tmp_refs);
 	if (count) {
 		seq_puts(m, " proc");
-		hlist_for_each_entry(ref, &node->refs, node_entry)
+		hlist_for_each_entry(ref, pos, &node->refs, node_entry)
 			seq_printf(m, " %d", ref->proc->pid);
 	}
 	seq_puts(m, "\n");
@@ -5919,13 +5919,14 @@ static int binder_state_show(struct seq_file *m, void *unused)
 	struct binder_proc *proc;
 	struct binder_node *node;
 	struct binder_node *last_node = NULL;
+	struct hlist_node *pos;
 
 	seq_puts(m, "binder state:\n");
 
 	spin_lock(&binder_dead_nodes_lock);
 	if (!hlist_empty(&binder_dead_nodes))
 		seq_puts(m, "dead nodes:\n");
-	hlist_for_each_entry(node, &binder_dead_nodes, dead_node) {
+	hlist_for_each_entry(node, pos, &binder_dead_nodes, dead_node) {
 		/*
 		 * take a temporary reference on the node so it
 		 * survives and isn't removed from the list
@@ -5946,7 +5947,7 @@ static int binder_state_show(struct seq_file *m, void *unused)
 		binder_put_node(last_node);
 
 	mutex_lock(&binder_procs_lock);
-	hlist_for_each_entry(proc, &binder_procs, proc_node)
+	hlist_for_each_entry(proc, pos, &binder_procs, proc_node)
 		print_binder_proc(m, proc, 1);
 	mutex_unlock(&binder_procs_lock);
 
@@ -5956,13 +5957,14 @@ static int binder_state_show(struct seq_file *m, void *unused)
 static int binder_stats_show(struct seq_file *m, void *unused)
 {
 	struct binder_proc *proc;
+	struct hlist_node *pos;
 
 	seq_puts(m, "binder stats:\n");
 
 	print_binder_stats(m, "", &binder_stats);
 
 	mutex_lock(&binder_procs_lock);
-	hlist_for_each_entry(proc, &binder_procs, proc_node)
+	hlist_for_each_entry(proc, pos, &binder_procs, proc_node)
 		print_binder_proc_stats(m, proc);
 	mutex_unlock(&binder_procs_lock);
 
@@ -5972,10 +5974,11 @@ static int binder_stats_show(struct seq_file *m, void *unused)
 static int binder_transactions_show(struct seq_file *m, void *unused)
 {
 	struct binder_proc *proc;
+	struct hlist_node *pos;
 
 	seq_puts(m, "binder transactions:\n");
 	mutex_lock(&binder_procs_lock);
-	hlist_for_each_entry(proc, &binder_procs, proc_node)
+	hlist_for_each_entry(proc, pos, &binder_procs, proc_node)
 		print_binder_proc(m, proc, 0);
 	mutex_unlock(&binder_procs_lock);
 
@@ -5985,10 +5988,11 @@ static int binder_transactions_show(struct seq_file *m, void *unused)
 static int binder_proc_show(struct seq_file *m, void *unused)
 {
 	struct binder_proc *itr;
+	struct hlist_node *pos;
 	int pid = (unsigned long)m->private;
 
 	mutex_lock(&binder_procs_lock);
-	hlist_for_each_entry(itr, &binder_procs, proc_node) {
+	hlist_for_each_entry(itr, pos, &binder_procs, proc_node) {
 		if (itr->pid == pid) {
 			seq_puts(m, "binder proc state:\n");
 			print_binder_proc(m, itr, 1);
@@ -6095,11 +6099,9 @@ static int __init binder_init(void)
 	int ret;
 	char *device_name, *device_names, *device_tmp;
 	struct binder_device *device;
-	struct hlist_node *tmp;
+	struct hlist_node *node, *tmp;
 
-	ret = binder_alloc_shrinker_init();
-	if (ret)
-		return ret;
+	binder_alloc_shrinker_init();
 
 	atomic_set(&binder_transaction_log.cur, ~0U);
 	atomic_set(&binder_transaction_log_failed.cur, ~0U);
@@ -6158,7 +6160,7 @@ static int __init binder_init(void)
 	return ret;
 
 err_init_binder_device_failed:
-	hlist_for_each_entry_safe(device, tmp, &binder_devices, hlist) {
+	hlist_for_each_entry_safe(device, node, tmp, &binder_devices, hlist) {
 		misc_deregister(&device->miscdev);
 		hlist_del(&device->hlist);
 		kfree(device);
